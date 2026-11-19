@@ -1,20 +1,15 @@
 {
   "id": "kino-resolver",
   "name": "Kino Resolver",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "apiVersion": 20,
   "entry": "plugin.js",
   "icon": "icon.png",
   "description": "Universal hoster/embed resolver + deobfuscator for Kino plugins (Kodi ports and native). Opens the door \"resolver\".",
   "author": "xuper-plugin",
   "homepage": "https://github.com/xuper-plugin/kino-plugin-kino-resolver",
-  "hosts": [
-    "voe.sx",
-    "streamwish.to",
-    "vibuxer.com",
-    "yuguaab.com"
-  ],
-  "browser": true,
+  "hosts": [],
+  "fetchHosts": "any",
   "capabilities": [],
   "provides": {
     "resolver": {

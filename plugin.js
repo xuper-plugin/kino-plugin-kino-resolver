@@ -128,33 +128,6 @@ function locationOf(r) {
 }
 var streamKind = (u) => /\.m3u8(\?|$)/i.test(u) ? "hls" : /\.mpd(\?|$)/i.test(u) ? "dash" : "mp4";
 var toHeaders = (o) => Object.entries(o || {}).filter(([, v]) => v != null).map(([name, value]) => ({ name, value: String(value) }));
-async function browserCapture(url, { referer, match, timeoutMs } = {}) {
-  const b = globalThis.kino && kino.browser;
-  if (!b || typeof b.capture !== "function") return [];
-  const opts = {};
-  if (referer) opts.headers = { Referer: referer };
-  if (match) opts.match = match;
-  if (timeoutMs) opts.timeoutMs = timeoutMs;
-  let cap;
-  try {
-    cap = await b.capture(url, opts);
-  } catch {
-    return [];
-  }
-  const out = [];
-  for (const m of cap && cap.media || []) {
-    const h = m.headers || {};
-    const headers = toHeaders(h);
-    out.push({
-      url: m.url,
-      kind: streamKind(m.url),
-      server: "browser",
-      referer: h.Referer || h.referer || referer || void 0,
-      headers: headers.length ? headers : void 0
-    });
-  }
-  return out;
-}
 
 // src/extractors/voe.js
 var RE = /voe\.sx|voe-unblock|voeunbl|voeun|edwardarriveoften|yodelswartlike|nathanfromsubject|reputationsheriff|fittingcentermondaysunday|tinycat-voe-fashion|scatch176duplicities/i;
@@ -565,22 +538,15 @@ function findExtractor(url) {
 async function resolve({ url, referer } = {}) {
   if (!url) return { streams: [], error: "bad_request" };
   const ex = findExtractor(url);
-  let target = url;
-  let inlineError = null;
-  if (ex) {
-    target = ex.normalize ? ex.normalize(url) : url;
-    try {
-      const r = await ex.resolve(target, { referer });
-      if (r && Array.isArray(r.streams) && r.streams.length) return r;
-      inlineError = r && r.error || "no_streams";
-    } catch {
-      inlineError = "upstream_error";
-    }
-    if (inlineError === "dead") return { streams: [], error: "dead" };
+  if (!ex) return { streams: [], error: "needs_browser" };
+  const target = ex.normalize ? ex.normalize(url) : url;
+  try {
+    const r = await ex.resolve(target, { referer });
+    if (r && Array.isArray(r.streams) && r.streams.length) return r;
+    return { streams: [], error: r && r.error || "needs_browser" };
+  } catch {
+    return { streams: [], error: "needs_browser" };
   }
-  const viaBrowser = await browserCapture(target, { referer });
-  if (viaBrowser.length) return { streams: viaBrowser };
-  return { streams: [], error: ex ? inlineError || "needs_browser" : "unsupported" };
 }
 function doUnpack({ code } = {}) {
   try {
