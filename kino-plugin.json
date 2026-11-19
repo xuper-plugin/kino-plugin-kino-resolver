@@ -1,36 +1,89 @@
 {
   "id": "kino-resolver",
   "name": "Kino Resolver",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "apiVersion": 20,
   "entry": "plugin.js",
   "icon": "icon.png",
   "description": "Universal hoster/embed resolver + deobfuscator for Kino plugins (Kodi ports and native). Opens the door \"resolver\".",
   "author": "xuper-plugin",
   "homepage": "https://github.com/xuper-plugin/kino-plugin-kino-resolver",
-  "hosts": [
-    "voe.sx", "streamwish.to", "streamtape.com", "mp4upload.com", "vidoza.net",
-    "uqload.com", "vidmoly.to", "streamvid.net", "fastream.to", "streamhide.com",
-    "streamlare.com", "supervideo.tv", "ok.ru"
-  ],
+  "hosts": [],
   "fetchHosts": "any",
   "browser": true,
-  "capabilities": ["resolve", "search", "screen"],
-  "screen": { "label": "Resolver", "labelEn": "Resolver", "icon": "link", "menuOpens": "screen", "opensFrom": ["menu"] },
+  "capabilities": [
+    "resolve",
+    "search",
+    "screen"
+  ],
+  "screen": {
+    "label": "Resolver",
+    "labelEn": "Resolver",
+    "icon": "link",
+    "menuOpens": "screen",
+    "opensFrom": [
+      "menu"
+    ]
+  },
+  "settings": [
+    {
+      "key": "seedUrl",
+      "type": "url",
+      "label": "URL para probar (opcional)",
+      "labelEn": "Test URL (optional)",
+      "hint": "Pega un enlace; la pantalla lo abre precargado. Opcional.",
+      "hintEn": "Paste a link; the screen opens with it prefilled. Optional."
+    }
+  ],
   "provides": {
     "resolver": {
       "summary": "Resolve a hoster/embed URL to playable streams, deobfuscate packed JS, normalize a hoster domain",
       "calls": {
-        "resolve": { "in": { "url": "string", "referer": "string?" }, "out": "StreamSet" },
-        "unpack": { "in": { "code": "string" }, "out": "Unpacked" },
-        "normalizeHost": { "in": { "url": "string" }, "out": "NormalizedHost" }
+        "resolve": {
+          "in": {
+            "url": "string",
+            "referer": "string?"
+          },
+          "out": "StreamSet"
+        },
+        "unpack": {
+          "in": {
+            "code": "string"
+          },
+          "out": "Unpacked"
+        },
+        "normalizeHost": {
+          "in": {
+            "url": "string"
+          },
+          "out": "NormalizedHost"
+        }
       },
       "types": {
-        "StreamSet": { "streams": "Stream[]", "error": "string?" },
-        "Stream": { "url": "string", "kind": "string", "quality": "string?", "lang": "string?", "server": "string?", "referer": "string?", "headers": "Header[]?" },
-        "Header": { "name": "string", "value": "string" },
-        "Unpacked": { "code": "string" },
-        "NormalizedHost": { "server": "string", "url": "string" }
+        "StreamSet": {
+          "streams": "Stream[]",
+          "error": "string?"
+        },
+        "Stream": {
+          "url": "string",
+          "kind": "string",
+          "quality": "string?",
+          "lang": "string?",
+          "server": "string?",
+          "referer": "string?",
+          "headers": "Header[]?"
+        },
+        "Header": {
+          "name": "string",
+          "value": "string"
+        },
+        "Unpacked": {
+          "code": "string"
+        },
+        "NormalizedHost": {
+          "server": "string",
+          "url": "string"
+        }
       }
     }
   }

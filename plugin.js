@@ -725,6 +725,13 @@ var hostOf = (u) => {
   const m = /^https?:\/\/([^/]+)/i.exec(String(u));
   return m ? m[1] : "Video";
 };
+var cfgGet = (k) => {
+  try {
+    return globalThis.kino && kino.config && typeof kino.config.get === "function" ? kino.config.get(k) || "" : "";
+  } catch {
+    return "";
+  }
+};
 async function search(query) {
   const q = String(query && query.q || "").trim();
   if (!/^https?:\/\//i.test(q)) return [];
@@ -733,7 +740,7 @@ async function search(query) {
 }
 function screen(ctx) {
   const state = ctx && ctx.state || {};
-  const url = typeof state.url === "string" ? state.url : "";
+  const url = typeof state.url === "string" ? state.url : cfgGet("seedUrl");
   const result = state.result || null;
   const children = [
     { type: "Text", text: "Resolver de video", textEn: "Video resolver", style: "h3" },
