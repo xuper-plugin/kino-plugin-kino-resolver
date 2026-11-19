@@ -1,0 +1,36 @@
+{
+  "id": "kino-resolver",
+  "name": "Kino Resolver",
+  "version": "0.0.1",
+  "apiVersion": 20,
+  "entry": "plugin.js",
+  "icon": "icon.png",
+  "description": "Universal hoster/embed resolver + deobfuscator for Kino plugins (Kodi ports and native). Opens the door \"resolver\".",
+  "author": "xuper-plugin",
+  "homepage": "https://github.com/xuper-plugin/kino-plugin-kino-resolver",
+  "hosts": [
+    "voe.sx",
+    "streamwish.to",
+    "vibuxer.com",
+    "yuguaab.com"
+  ],
+  "browser": true,
+  "capabilities": [],
+  "provides": {
+    "resolver": {
+      "summary": "Resolve a hoster/embed URL to playable streams, deobfuscate packed JS, normalize a hoster domain",
+      "calls": {
+        "resolve": { "in": { "url": "string", "referer": "string?" }, "out": "StreamSet" },
+        "unpack": { "in": { "code": "string" }, "out": "Unpacked" },
+        "normalizeHost": { "in": { "url": "string" }, "out": "NormalizedHost" }
+      },
+      "types": {
+        "StreamSet": { "streams": "Stream[]", "error": "string?" },
+        "Stream": { "url": "string", "kind": "string", "quality": "string?", "lang": "string?", "server": "string?", "referer": "string?", "headers": "Header[]?" },
+        "Header": { "name": "string", "value": "string" },
+        "Unpacked": { "code": "string" },
+        "NormalizedHost": { "server": "string", "url": "string" }
+      }
+    }
+  }
+}
