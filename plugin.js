@@ -676,7 +676,10 @@ async function detect(input) {
   return { ok: false, kind: "page", embeds: [], canBrowser: true };
 }
 async function resolveContent(ref) {
-  const url = String(ref == null ? "" : ref).replace(/^[a-z]\|/i, "").trim();
+  const raw = String(ref == null ? "" : ref).replace(/^[a-z]\|/i, "");
+  const tab = raw.indexOf("	");
+  const url = (tab >= 0 ? raw.slice(0, tab) : raw).trim();
+  const referer = (tab >= 0 ? raw.slice(tab + 1) : "").trim();
   let embeds = await findEmbeds(url);
   if (!embeds.length) embeds = [{ url, server: "navegador" }];
   const streams = [];
@@ -684,14 +687,14 @@ async function resolveContent(ref) {
   for (const e of embeds) {
     let got = [];
     try {
-      const r = await resolve({ url: e.url, referer: url });
+      const r = await resolve({ url: e.url, referer: referer || url });
       got = r && r.streams || [];
     } catch {
       got = [];
     }
     if (!got.length) {
       try {
-        got = await browserCapture(e.url, { referer: url, timeoutMs: 18e3 });
+        got = await browserCapture(e.url, { referer: referer || void 0, timeoutMs: 18e3 });
       } catch {
         got = [];
       }
@@ -741,16 +744,19 @@ async function search(query) {
 function screen(ctx) {
   const state = ctx && ctx.state || {};
   const url = typeof state.url === "string" ? state.url : cfgGet("seedUrl");
+  const referer = typeof state.referer === "string" ? state.referer : "";
   const result = state.result || null;
   const children = [
     { type: "Text", text: "Resolver de video", textEn: "Video resolver", style: "h3" },
     { type: "Text", text: "Pega el enlace de una página o directamente el del servidor de video. Detecto si puedo reproducirlo.", textEn: "Paste a page link or a hoster/embed link. I'll detect whether I can play it.", color: "secondary" },
     { type: "Form", key: "f", onSubmitted: "detect", gap: 12, children: [
       { type: "TextField", key: "url", labelText: "URL de la página o del video", labelTextEn: "Page or video URL", value: url, maxLength: 2e3 },
+      { type: "TextField", key: "referer", labelText: "Referer (opcional)", labelTextEn: "Referer (optional)", value: referer, maxLength: 2e3 },
       { type: "ElevatedButton", labelText: "Detectar", labelTextEn: "Detect", submit: true }
     ] }
   ];
-  const playButton = (es, en) => ({ type: "ElevatedButton", key: "play", labelText: es, labelTextEn: en, onPressed: { go: { play: { ref: "u|" + url, kind: "movie", id: slug(url), title: hostOf(url) } } } });
+  const playRef = "u|" + url + (referer.trim() ? "	" + referer.trim() : "");
+  const playButton = (es, en) => ({ type: "ElevatedButton", key: "play", labelText: es, labelTextEn: en, onPressed: { go: { play: { ref: playRef, kind: "movie", id: slug(url), title: hostOf(url) } } } });
   if (result && result.ok) {
     const servers = [...new Set((result.embeds || []).map((e) => e.server))].filter(Boolean).join(", ");
     children.push({ type: "Card", key: "ok", children: [
@@ -775,8 +781,9 @@ async function screenEvent(ctx) {
   const { name: ev, value } = ctx || {};
   if (ev === "detect") {
     const url = (value && typeof value.url === "string" ? value.url : "").trim();
-    if (!url) return { state: { url: "", result: null } };
-    return { state: { url, result: await detect(url) } };
+    const referer = (value && typeof value.referer === "string" ? value.referer : "").trim();
+    if (!url) return { state: { url: "", referer, result: null } };
+    return { state: { url, referer, result: await detect(url) } };
   }
   return null;
 }
