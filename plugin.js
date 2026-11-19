@@ -130,20 +130,48 @@ var streamKind = (u) => /\.m3u8(\?|$)/i.test(u) ? "hls" : /\.mpd(\?|$)/i.test(u)
 var toHeaders = (o) => Object.entries(o || {}).filter(([, v]) => v != null).map(([name, value]) => ({ name, value: String(value) }));
 
 // src/extractors/voe.js
-var RE = /voe\.sx|voe-unblock|voeunbl|voeun|edwardarriveoften|yodelswartlike|nathanfromsubject|reputationsheriff|fittingcentermondaysunday|tinycat-voe-fashion|scatch176duplicities/i;
+var RE = /voe\.sx|voe-unblock|voeunbl|voeun|edwardarriveoften|yodelswartlike|nathanfromsubject|reputationsheriff|fittingcentermondaysunday|tinycat-voe-fashion|scatch176duplicities|arianathankspecial|cloudwindow-route/i;
+var JUNK = ["@$", "^^", "~@", "%?", "*~", "!!", "#&"];
+var rot13 = (s) => s.replace(/[a-zA-Z]/g, (c) => {
+  const b = c <= "Z" ? 65 : 97;
+  return String.fromCharCode(b + (c.charCodeAt(0) - b + 13) % 26);
+});
+function voeDecode(data) {
+  try {
+    const raw = single(data, '<script type="application/json">(\\[".*?"\\])<\/script>');
+    if (!raw) return null;
+    const obf = JSON.parse(raw)[0];
+    let s = rot13(obf);
+    for (const j of JUNK) s = s.split(j).join("");
+    const dec1 = b64decode(s);
+    let shifted = "";
+    for (let i = 0; i < dec1.length; i++) shifted += String.fromCharCode((dec1.charCodeAt(i) - 3 + 256) % 256);
+    const out = b64decode([...shifted].reverse().join(""));
+    return JSON.parse(out);
+  } catch {
+    return null;
+  }
+}
 var voe_default = {
   id: "voe",
   match: (url) => RE.test(url),
   normalize(url) {
-    const id = single(url, "(?:[a-z0-9.-]+)/(?:e/|)([A-Za-z0-9]+)");
+    const id = single(url, "voe\\.sx/(?:e/|)([A-Za-z0-9]+)");
     return id ? "https://voe.sx/e/" + id : url;
   },
   async resolve(url) {
     let data = await getText(url);
-    if (/File not found|File is no longer available|Error 404|404 - No encontrado|Not found/i.test(data)) return { streams: [], error: "dead" };
-    if (data.includes("permanentToken")) {
-      const r = single(data, "(?i)window\\.location\\.href\\s*=\\s*'([^']+)'");
-      if (r) data = await getText(r);
+    if (/File not found|File is no longer available|Error 404|404 - No encontrado/i.test(data)) return { streams: [], error: "dead" };
+    if (data.includes("permanentToken") || data.includes("Redirecting")) {
+      const r = single(data, "window\\.location\\.href\\s*=\\s*'(https?://[^']+)'");
+      if (r) data = await getText(r, { referer: "https://voe.sx/" });
+    }
+    const dec = voeDecode(data);
+    if (dec) {
+      const streams2 = [];
+      if (dec.source) streams2.push({ url: dec.source, kind: streamKind(dec.source), server: "voe", referer: "https://voe.sx/" });
+      if (dec.direct_access_url && dec.direct_access_url !== dec.source) streams2.push({ url: dec.direct_access_url, kind: streamKind(dec.direct_access_url), server: "voe", referer: "https://voe.sx/" });
+      if (streams2.length) return { streams: streams2 };
     }
     let srcs = multi(data, "(?:mp4|hls)': '([^']+)'");
     if (!srcs.length) {
