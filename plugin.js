@@ -128,6 +128,33 @@ function locationOf(r) {
 }
 var streamKind = (u) => /\.m3u8(\?|$)/i.test(u) ? "hls" : /\.mpd(\?|$)/i.test(u) ? "dash" : "mp4";
 var toHeaders = (o) => Object.entries(o || {}).filter(([, v]) => v != null).map(([name, value]) => ({ name, value: String(value) }));
+async function browserCapture(url, { referer, match, timeoutMs } = {}) {
+  const b = globalThis.kino && kino.browser;
+  if (!b || typeof b.capture !== "function") return [];
+  const opts = {};
+  if (referer) opts.headers = { Referer: referer };
+  if (match) opts.match = match;
+  if (timeoutMs) opts.timeoutMs = timeoutMs;
+  let cap;
+  try {
+    cap = await b.capture(url, opts);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const m of cap && cap.media || []) {
+    const h = m.headers || {};
+    const headers = toHeaders(h);
+    out.push({
+      url: m.url,
+      kind: streamKind(m.url),
+      server: "browser",
+      referer: h.Referer || h.referer || referer || void 0,
+      headers: headers.length ? headers : void 0
+    });
+  }
+  return out;
+}
 
 // src/extractors/voe.js
 var RE = /voe\.sx|voe-unblock|voeunbl|voeun|edwardarriveoften|yodelswartlike|nathanfromsubject|reputationsheriff|fittingcentermondaysunday|tinycat-voe-fashion|scatch176duplicities|arianathankspecial|cloudwindow-route/i;
@@ -380,8 +407,8 @@ var vidmoly_default = {
     return p;
   },
   async resolve(url, { referer } = {}) {
-    const slug = url.replace("https://vidmoly.me/", "").replace(".html", "");
-    const data = await getText(url, { referer, headers: { cookie: "cf_turnstile_demo_pass_" + slug + "=1" } });
+    const slug2 = url.replace("https://vidmoly.me/", "").replace(".html", "");
+    const data = await getText(url, { referer, headers: { cookie: "cf_turnstile_demo_pass_" + slug2 + "=1" } });
     if (/\/notice\.php|This video not found/i.test(data)) return { streams: [], error: "dead" };
     if (data.includes(">Security Check<")) return { streams: [], error: "needs_browser" };
     let u = single(data, "sources:.*?file:.*?'(.*?)'.*?,") || single(data, 'sources:.*?file:.*?"(.*?)".*?,');
@@ -588,13 +615,145 @@ function doNormalizeHost({ url } = {}) {
   if (!ex) return { server: "directo", url: url || "" };
   return { server: ex.id, url: ex.normalize ? ex.normalize(url) : url };
 }
+var SERVERS = EXTRACTORS.map((e) => e.id);
+async function findEmbeds(input) {
+  const url = String(input == null ? "" : input).trim();
+  if (!/^https?:\/\//i.test(url)) return [];
+  const direct = findExtractor(url);
+  if (direct) return [{ url, server: direct.id }];
+  let html = "";
+  try {
+    html = await getText(url, { referer: url });
+  } catch {
+    return [];
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  const add = (u) => {
+    const c = String(u || "").replace(/&amp;/g, "&").trim();
+    if (!/^https?:\/\//i.test(c) || seen.has(c)) return;
+    const ex = findExtractor(c);
+    if (ex) {
+      seen.add(c);
+      out.push({ url: c, server: ex.id });
+    }
+  };
+  for (const m of multi(html, `<iframe[^>]+src=["']([^"']+)`)) add(m);
+  for (const m of multi(html, `https?://[^\\s"'<>]+`)) add(m);
+  return out.slice(0, 12);
+}
+async function detect(input) {
+  const url = String(input == null ? "" : input).trim();
+  if (!/^https?:\/\//i.test(url)) return { ok: false, reason: "bad_url", kind: "none", embeds: [] };
+  if (findExtractor(url)) return { ok: true, kind: "embed", embeds: [{ url, server: findExtractor(url).id }] };
+  const embeds = await findEmbeds(url);
+  if (embeds.length) return { ok: true, kind: "page", embeds };
+  return { ok: false, kind: "page", embeds: [], canBrowser: true };
+}
+async function resolveContent(ref) {
+  const url = String(ref == null ? "" : ref).replace(/^[a-z]\|/i, "").trim();
+  let embeds = await findEmbeds(url);
+  if (!embeds.length) embeds = [{ url, server: "navegador" }];
+  const streams = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const e of embeds) {
+    let got = [];
+    try {
+      const r = await resolve({ url: e.url, referer: url });
+      got = r && r.streams || [];
+    } catch {
+      got = [];
+    }
+    if (!got.length) {
+      try {
+        got = await browserCapture(e.url, { referer: url, timeoutMs: 18e3 });
+      } catch {
+        got = [];
+      }
+    }
+    for (const s of got) {
+      if (!s.url || seen.has(s.url)) continue;
+      seen.add(s.url);
+      const stream = { url: s.url };
+      if (s.server) stream.label = s.server;
+      const hdrs = {};
+      for (const h of s.headers || []) hdrs[h.name] = h.value;
+      if (s.referer && !hdrs.Referer) hdrs.Referer = s.referer;
+      if (Object.keys(hdrs).length) stream.headers = hdrs;
+      streams.push(stream);
+    }
+  }
+  if (!streams.length) throw kino.error("not_found", "unresolved", { userMessage: "No se pudo resolver el video de esa URL" });
+  const [first, ...rest] = streams;
+  const main = { ...first, expiresInSeconds: 1800 };
+  if (rest.length) main.alternatives = rest.slice(0, 8);
+  return main;
+}
 
 // src/plugin.js
 var proto_resolver_resolve = (arg) => resolve(arg || {});
 var proto_resolver_unpack = (arg) => doUnpack(arg || {});
 var proto_resolver_normalizeHost = (arg) => doNormalizeHost(arg || {});
+var resolve2 = (ref) => resolveContent(ref);
+var slug = (u) => String(u).replace(/[^A-Za-z0-9._~-]/g, "-").slice(0, 128) || "video";
+var hostOf = (u) => {
+  const m = /^https?:\/\/([^/]+)/i.exec(String(u));
+  return m ? m[1] : "Video";
+};
+async function search(query) {
+  const q = String(query && query.q || "").trim();
+  if (!/^https?:\/\//i.test(q)) return [];
+  const embeds = await findEmbeds(q);
+  return embeds.length ? [{ id: slug(q), ref: "u|" + q, title: hostOf(q), kind: "movie" }] : [];
+}
+function screen(ctx) {
+  const state = ctx && ctx.state || {};
+  const url = typeof state.url === "string" ? state.url : "";
+  const result = state.result || null;
+  const children = [
+    { type: "Text", text: "Resolver de video", textEn: "Video resolver", style: "h3" },
+    { type: "Text", text: "Pega el enlace de una página o directamente el del servidor de video. Detecto si puedo reproducirlo.", textEn: "Paste a page link or a hoster/embed link. I'll detect whether I can play it.", color: "secondary" },
+    { type: "Form", key: "f", onSubmitted: "detect", gap: 12, children: [
+      { type: "TextField", key: "url", labelText: "URL de la página o del video", labelTextEn: "Page or video URL", value: url, maxLength: 2e3 },
+      { type: "ElevatedButton", labelText: "Detectar", labelTextEn: "Detect", submit: true }
+    ] }
+  ];
+  const playButton = (es, en) => ({ type: "ElevatedButton", key: "play", labelText: es, labelTextEn: en, onPressed: { go: { play: { ref: "u|" + url, kind: "movie", id: slug(url), title: hostOf(url) } } } });
+  if (result && result.ok) {
+    const servers = [...new Set((result.embeds || []).map((e) => e.server))].filter(Boolean).join(", ");
+    children.push({ type: "Card", key: "ok", children: [
+      { type: "Text", text: "Puedo reproducirlo ✓", textEn: "I can play it ✓", color: "primary", style: "h4" },
+      ...servers ? [{ type: "Text", text: "Servidor: " + servers, textEn: "Server: " + servers, color: "secondary" }] : [],
+      playButton("Ver video", "Watch video")
+    ] });
+  } else if (result && result.canBrowser) {
+    children.push({ type: "Card", key: "try", children: [
+      { type: "Text", text: "No reconocí un servidor en esa URL, pero puedo intentar abrirla en el navegador y capturar el video.", textEn: "I didn't recognise a server in that URL, but I can try opening it in the browser and capturing the video.", color: "secondary" },
+      playButton("Intentar reproducir", "Try to play")
+    ] });
+  } else if (result) {
+    children.push({ type: "Card", key: "no", children: [
+      { type: "Text", text: "Escribe un enlace http(s) válido.", textEn: "Enter a valid http(s) link.", color: "secondary" }
+    ] });
+  }
+  children.push({ type: "Text", text: "Servidores soportados: " + SERVERS.join(", "), textEn: "Supported servers: " + SERVERS.join(", "), color: "muted", style: "caption" });
+  return { type: "Scaffold", key: "app", body: { type: "SingleChildScrollView", key: "p", children: [{ type: "Column", padding: 24, gap: 16, crossAxisAlignment: "stretch", children }] } };
+}
+async function screenEvent(ctx) {
+  const { name: ev, value } = ctx || {};
+  if (ev === "detect") {
+    const url = (value && typeof value.url === "string" ? value.url : "").trim();
+    if (!url) return { state: { url: "", result: null } };
+    return { state: { url, result: await detect(url) } };
+  }
+  return null;
+}
 export {
   proto_resolver_normalizeHost,
   proto_resolver_resolve,
-  proto_resolver_unpack
+  proto_resolver_unpack,
+  resolve2 as resolve,
+  screen,
+  screenEvent,
+  search
 };

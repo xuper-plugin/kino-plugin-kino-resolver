@@ -1,16 +1,22 @@
 {
   "id": "kino-resolver",
   "name": "Kino Resolver",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "apiVersion": 20,
   "entry": "plugin.js",
   "icon": "icon.png",
   "description": "Universal hoster/embed resolver + deobfuscator for Kino plugins (Kodi ports and native). Opens the door \"resolver\".",
   "author": "xuper-plugin",
   "homepage": "https://github.com/xuper-plugin/kino-plugin-kino-resolver",
-  "hosts": [],
+  "hosts": [
+    "voe.sx", "streamwish.to", "streamtape.com", "mp4upload.com", "vidoza.net",
+    "uqload.com", "vidmoly.to", "streamvid.net", "fastream.to", "streamhide.com",
+    "streamlare.com", "supervideo.tv", "ok.ru"
+  ],
   "fetchHosts": "any",
-  "capabilities": [],
+  "browser": true,
+  "capabilities": ["resolve", "search", "screen"],
+  "screen": { "label": "Resolver", "labelEn": "Resolver", "icon": "link", "menuOpens": "screen", "opensFrom": ["menu"] },
   "provides": {
     "resolver": {
       "summary": "Resolve a hoster/embed URL to playable streams, deobfuscate packed JS, normalize a hoster domain",
