@@ -577,8 +577,33 @@ var okru_default = {
   }
 };
 
+// src/extractors/zures.js
+var RE4 = /\bvimeos\.(net|zip|to|sx|cc|xyz|lol|art|fun)\b/i;
+var zures_default = {
+  id: "zures",
+  match: (url) => RE4.test(url),
+  normalize: (url) => url,
+  async resolve(url) {
+    const host = single(url, "https?://([^/]+)") || "vimeos.net";
+    const data = await getText(url, { referer: "https://" + host + "/" });
+    if (/File not found|not found|deleted|no longer available/i.test(data)) return { streams: [], error: "dead" };
+    const start = data.indexOf("eval(function(p,a,c,k,e,d)");
+    if (start < 0) return { streams: [], error: "needs_browser" };
+    const end = data.indexOf("<\/script>", start);
+    let code = "";
+    try {
+      code = unpack(data.slice(start, end).trim());
+    } catch {
+      return { streams: [], error: "needs_browser" };
+    }
+    const file = single(code, `file\\s*:\\s*["']([^"']+\\.m3u8[^"']*)`) || single(code, `(https?://[^"']+\\.m3u8[^"']*)`) || single(code, `file\\s*:\\s*["']([^"']+)["']`);
+    if (!file || !/^https?:/i.test(file)) return { streams: [], error: "needs_browser" };
+    return { streams: [{ url: file, kind: streamKind(file), server: "zures", referer: "https://" + host + "/" }] };
+  }
+};
+
 // src/registry.js
-var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default];
+var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default];
 function findExtractor(url) {
   return EXTRACTORS.find((e) => {
     try {
