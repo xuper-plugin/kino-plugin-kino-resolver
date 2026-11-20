@@ -738,7 +738,7 @@ var nupload_default = {
 };
 
 // src/extractors/mixdrop.js
-var RE7 = /\b(?:mi+x+dro{1,2}ps?|m1xdrop|mxdrop|mixdrp|mixdropjmk|md3b0j6hj|mdbekjwqa|md[3bfyz][a-z0-9]{5,})\b/i;
+var RE7 = /\b(?:mi+x+dro{1,2}ps?|m1xdrop|mxdrop|mxcontent|mixdrp|mixdropjmk|md3b0j6hj|mdbekjwqa|md[3bfyz][a-z0-9]{5,})\b/i;
 var mixdrop_default = {
   id: "mixdrop",
   match: (url) => RE7.test(url),
@@ -950,7 +950,7 @@ var hexload_default = {
 };
 
 // src/extractors/filemoon.js
-var RE11 = /f(?:1|i)lemoon|moonmov|kerapoxy/i;
+var RE11 = /f(?:1|i)lemoon|moonmov|kerapoxy|byse/i;
 var UA2 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 var POW_BUDGET_MS = 2e4;
 var TOKEN_KEY = "fm:captchaToken";
