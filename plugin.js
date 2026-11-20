@@ -821,16 +821,9 @@ async function resolve({ url, referer } = {}) {
   const ex = findExtractor(url);
   if (!ex) return { streams: [], error: "needs_browser" };
   const target = ex.normalize ? ex.normalize(url) : url;
-  const trace = (m) => {
-    try {
-      if (globalThis.kino && kino.log) kino.log("[rvtrace]", ex.id, m);
-    } catch {
-    }
-  };
   try {
     const r = await ex.resolve(target, { referer });
     if (r && Array.isArray(r.streams) && r.streams.length) {
-      trace("OK " + String(r.streams[0].url).slice(0, 80) + " ref=" + (r.streams[0].referer || "-"));
       for (const s of r.streams) {
         if (!s.referer) s.referer = target;
         const arr = Array.isArray(s.headers);
@@ -841,11 +834,11 @@ async function resolve({ url, referer } = {}) {
       }
       return r;
     }
-    trace("MISS " + (r && r.error || "no-stream"));
     return { streams: [], error: r && r.error || "needs_browser" };
   } catch (e) {
-    trace("THREW " + (e && e.message ? String(e.message).slice(0, 60) : "?"));
-    return { streams: [], error: "needs_browser" };
+    const msg = e && e.message ? String(e.message) : "";
+    const dead = /unable to resolve host|ENOTFOUND|EAI_AGAIN|ERR_NAME_NOT_RESOLVED|name not resolved|no address associated|nodename nor servname/i.test(msg);
+    return { streams: [], error: dead ? "dead" : "needs_browser" };
   }
 }
 function doUnpack({ code } = {}) {
