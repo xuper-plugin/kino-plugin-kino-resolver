@@ -110,9 +110,10 @@ function b64decode(input) {
   }
   return out;
 }
+var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 async function getText(url, { referer, headers } = {}) {
-  const h = { ...referer ? { Referer: referer } : {}, ...headers || {} };
-  const r = await kino.fetch(url, { headers: Object.keys(h).length ? h : void 0 });
+  const h = { "User-Agent": UA, ...referer ? { Referer: referer } : {}, ...headers || {} };
+  const r = await kino.fetch(url, { headers: h });
   return typeof r.text === "function" ? await r.text() : "";
 }
 async function fetchManual(url) {
@@ -739,7 +740,17 @@ async function resolve({ url, referer } = {}) {
   const target = ex.normalize ? ex.normalize(url) : url;
   try {
     const r = await ex.resolve(target, { referer });
-    if (r && Array.isArray(r.streams) && r.streams.length) return r;
+    if (r && Array.isArray(r.streams) && r.streams.length) {
+      for (const s of r.streams) {
+        if (!s.referer) s.referer = target;
+        const arr = Array.isArray(s.headers);
+        const hasUA = arr ? s.headers.some((x) => x && /^user-agent$/i.test(String(x.name))) : !!s.headers && Object.keys(s.headers).some((k) => /^user-agent$/i.test(k));
+        if (!hasUA) {
+          s.headers = arr ? [{ name: "User-Agent", value: UA }, ...s.headers] : { "User-Agent": UA, ...s.headers || {} };
+        }
+      }
+      return r;
+    }
     return { streams: [], error: r && r.error || "needs_browser" };
   } catch {
     return { streams: [], error: "needs_browser" };
