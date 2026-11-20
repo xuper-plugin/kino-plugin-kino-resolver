@@ -828,8 +828,75 @@ var gamovideo_default = {
   }
 };
 
+// src/extractors/doodstream.js
+var HOSTS = /* @__PURE__ */ new Set([
+  "dood.la",
+  "dood.yt",
+  "dood.to",
+  "dood.so",
+  "dood.ws",
+  "dood.pm",
+  "dood.wf",
+  "dood.re",
+  "dood.cx",
+  "dood.sh",
+  "dood.li",
+  "dood.watch",
+  "doodstream.com",
+  "dooood.com",
+  "doods.pro",
+  "d0000d.com",
+  "d000d.com",
+  "ds2play.com",
+  "ds2video.com",
+  "dsvplay.com",
+  "vide0.net",
+  "myvidplay.com",
+  "playmogo.com",
+  "all3do.com",
+  "do0od.com"
+]);
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+var ALPHABET2 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+var rand10 = () => {
+  let s = "";
+  for (let i = 0; i < 10; i++) s += ALPHABET2[Math.floor(Math.random() * ALPHABET2.length)];
+  return s;
+};
+var doodstream_default = {
+  id: "doodstream",
+  match(url) {
+    const h = hostOf(url);
+    return HOSTS.has(h) || /dood/i.test(h);
+  },
+  normalize: (url) => String(url).replace("/d/", "/e/"),
+  async resolve(url) {
+    let origin;
+    try {
+      origin = new URL(url).origin;
+    } catch {
+      return { streams: [], error: "bad_request" };
+    }
+    const page = await getText(url, { referer: origin + "/" });
+    if (!page) return { streams: [], error: "needs_browser" };
+    if (/Video not found|not found|deleted|removed/i.test(page) && !/pass_md5/.test(page)) return { streams: [], error: "dead" };
+    const path = (/\/pass_md5\/[\w\-/]+/.exec(page) || [])[0];
+    if (!path) return { streams: [], error: "needs_browser" };
+    const base = (await getText(origin + path, { referer: url })).trim();
+    if (!/^https?:\/\//.test(base)) return { streams: [], error: "needs_browser" };
+    const finalUrl = base + rand10();
+    return { streams: [{ url: finalUrl, kind: "mp4", server: "doodstream", referer: origin + "/", headers: { Referer: origin + "/" } }] };
+  }
+};
+
 // src/registry.js
-var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default];
+var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default];
 function findExtractor(url) {
   return EXTRACTORS.find((e) => {
     try {
@@ -963,7 +1030,7 @@ var proto_resolver_unpack = (arg) => doUnpack(arg || {});
 var proto_resolver_normalizeHost = (arg) => doNormalizeHost(arg || {});
 var resolve2 = (ref) => resolveContent(ref);
 var slug = (u) => String(u).replace(/[^A-Za-z0-9._~-]/g, "-").slice(0, 128) || "video";
-var hostOf = (u) => {
+var hostOf2 = (u) => {
   const m = /^https?:\/\/([^/]+)/i.exec(String(u));
   return m ? m[1] : "Video";
 };
@@ -978,7 +1045,7 @@ async function search(query) {
   const q = String(query && query.q || "").trim();
   if (!/^https?:\/\//i.test(q)) return [];
   const embeds = await findEmbeds(q);
-  return embeds.length ? [{ id: slug(q), ref: "u|" + q, title: hostOf(q), kind: "movie" }] : [];
+  return embeds.length ? [{ id: slug(q), ref: "u|" + q, title: hostOf2(q), kind: "movie" }] : [];
 }
 function screen(ctx) {
   const state = ctx && ctx.state || {};
@@ -995,7 +1062,7 @@ function screen(ctx) {
     ] }
   ];
   const playRef = "u|" + url + (referer.trim() ? "	" + referer.trim() : "");
-  const playButton = (es, en) => ({ type: "ElevatedButton", key: "play", labelText: es, labelTextEn: en, onPressed: { go: { play: { ref: playRef, kind: "movie", id: slug(url), title: hostOf(url) } } } });
+  const playButton = (es, en) => ({ type: "ElevatedButton", key: "play", labelText: es, labelTextEn: en, onPressed: { go: { play: { ref: playRef, kind: "movie", id: slug(url), title: hostOf2(url) } } } });
   if (result && result.ok) {
     const servers = [...new Set((result.embeds || []).map((e) => e.server))].filter(Boolean).join(", ");
     children.push({ type: "Card", key: "ok", children: [
