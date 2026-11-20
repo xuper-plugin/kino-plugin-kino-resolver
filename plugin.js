@@ -600,11 +600,24 @@ var supervideo_default = {
 };
 
 // src/extractors/okru.js
+function okruManifest(html) {
+  const un = String(html || "").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+  for (const key of ["ondemandHls", "ondemandDash", "hlsManifestUrl", "hlsMasterPlaylistUrl"]) {
+    const v = single(un, `"${key}":"([^"]+)"`);
+    if (v) return v.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+  }
+  return "";
+}
 var okru_default = {
   id: "okru",
   match: (url) => /okru\.link|ok\.ru|odnoklassniki/i.test(url),
   async resolve(url) {
     try {
+      if (/ok\.ru|odnoklassniki/i.test(url) && !url.includes("okru.link")) {
+        const man = okruManifest(await getText(url, { referer: "https://ok.ru/" }));
+        if (man) return { streams: [{ url: man, kind: /dash/i.test(man) ? "dash" : "hls", server: "okru", referer: "https://ok.ru/" }] };
+        return { streams: [], error: "needs_browser" };
+      }
       if (url.includes("okru.link/v2")) {
         const v = single(url, "t=([\\w.]+)");
         const r = await kino.fetch("https://apizz.okru.link/decoding", {
@@ -895,8 +908,298 @@ var doodstream_default = {
   }
 };
 
+// src/extractors/hexload.js
+function formOf(html) {
+  const block = /data\s*:\s*\{([^}]*)\}/.exec(html || "");
+  if (!block) return null;
+  const out = {};
+  for (const m of block[1].matchAll(/(\w+)\s*:\s*['"]([\w-]+)['"]/g)) out[m[1]] = m[2];
+  return Object.keys(out).length ? out : null;
+}
+var hexload_default = {
+  id: "hexload",
+  match: (url) => /hexload\.com/i.test(url),
+  async resolve(url) {
+    let u;
+    try {
+      u = new URL(url);
+    } catch {
+      return { streams: [], error: "bad_input" };
+    }
+    const html = await getText(u.href, { referer: u.origin + "/" });
+    if (!html) return { streams: [], error: "no_streams" };
+    const form = formOf(html);
+    if (!form) return { streams: [], error: "no_streams" };
+    const body = Object.entries(form).map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&");
+    const r = await kino.fetch(u.origin + "/download", {
+      method: "POST",
+      body,
+      headers: { "User-Agent": UA, Referer: u.href, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }
+    });
+    if (!r || !r.ok) return { streams: [], error: "no_streams" };
+    let j;
+    try {
+      j = JSON.parse(await r.text());
+    } catch {
+      return { streams: [], error: "no_streams" };
+    }
+    const src = j && j.result && j.result.url;
+    if (typeof src !== "string" || !/^https:\/\//.test(src)) return { streams: [], error: "no_streams" };
+    return { streams: [{ url: src, kind: /\.m3u8(\?|$)/i.test(src) ? "hls" : "mp4", server: "hexload", referer: u.origin + "/" }] };
+  }
+};
+
+// src/extractors/filemoon.js
+var RE11 = /f(?:1|i)lemoon|moonmov|kerapoxy/i;
+var UA2 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+var POW_BUDGET_MS = 2e4;
+var TOKEN_KEY = "fm:captchaToken";
+var hostOf2 = (url) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+};
+var originOf = (url) => {
+  try {
+    const u = new URL(url);
+    return u.origin;
+  } catch {
+    return "";
+  }
+};
+var videoId = (url) => (/(?:\/e\/|\/d\/|\/)([A-Za-z0-9]{8,})(?:[/?#]|$)/.exec(String(url).replace(originOf(url), "")) || [])[1] || "";
+var BE = 512;
+var LT = BE - 1;
+var LR = 2654435761;
+var HR = 2246822519;
+function byseHash(str, words) {
+  let e0 = 1779033703, e1 = 3144134277, e2 = 1013904242, e3 = 2773480762, t;
+  for (let i = 0; i < str.length; i++) {
+    e0 = e0 + (str.charCodeAt(i) & 255) >>> 0;
+    e0 = (e0 << 7 | e0 >>> 25) >>> 0;
+    e0 = e0 + e1 >>> 0;
+    t = (e3 ^ e0) >>> 0;
+    e3 = (t << 16 | t >>> 16) >>> 0;
+    e2 = e2 + e3 >>> 0;
+    t = (e1 ^ e2) >>> 0;
+    e1 = (t << 12 | t >>> 20) >>> 0;
+    e0 = e0 + e1 >>> 0;
+    t = (e3 ^ e0) >>> 0;
+    e3 = (t << 8 | t >>> 24) >>> 0;
+    e2 = e2 + e3 >>> 0;
+    t = (e1 ^ e2) >>> 0;
+    e1 = (t << 7 | t >>> 25) >>> 0;
+  }
+  for (let k = 0; k < 8; k++) {
+    e0 = e0 + e1 >>> 0;
+    t = (e3 ^ e0) >>> 0;
+    e3 = (t << 16 | t >>> 16) >>> 0;
+    e2 = e2 + e3 >>> 0;
+    t = (e1 ^ e2) >>> 0;
+    e1 = (t << 12 | t >>> 20) >>> 0;
+    e0 = e0 + e1 >>> 0;
+    t = (e3 ^ e0) >>> 0;
+    e3 = (t << 8 | t >>> 24) >>> 0;
+    e2 = e2 + e3 >>> 0;
+    t = (e1 ^ e2) >>> 0;
+    e1 = (t << 7 | t >>> 25) >>> 0;
+  }
+  const r = new Uint32Array(BE);
+  for (let i = 0; i < BE; i++) {
+    e0 = e0 + e1 >>> 0;
+    t = (e3 ^ e0) >>> 0;
+    e3 = (t << 16 | t >>> 16) >>> 0;
+    e2 = e2 + e3 >>> 0;
+    t = (e1 ^ e2) >>> 0;
+    e1 = (t << 12 | t >>> 20) >>> 0;
+    e0 = e0 + e1 >>> 0;
+    t = (e3 ^ e0) >>> 0;
+    e3 = (t << 8 | t >>> 24) >>> 0;
+    e2 = e2 + e3 >>> 0;
+    t = (e1 ^ e2) >>> 0;
+    e1 = (t << 7 | t >>> 25) >>> 0;
+    r[i] = (e0 ^ e2) >>> 0;
+  }
+  for (let rd = 0; rd < 2; rd++) for (let s = 0; s < BE; s++) {
+    let c = r[s] + r[r[s] & LT] >>> 0;
+    c = (c << 13 | c >>> 19) >>> 0;
+    c = (c ^ Math.imul(r[s + 1 & LT], LR) >>> 0) >>> 0;
+    r[s] = c;
+    e0 = (e0 ^ c) >>> 0;
+    e0 = e0 + e1 >>> 0;
+    t = (e3 ^ e0) >>> 0;
+    e3 = (t << 16 | t >>> 16) >>> 0;
+    e2 = e2 + e3 >>> 0;
+    t = (e1 ^ e2) >>> 0;
+    e1 = (t << 12 | t >>> 20) >>> 0;
+    e0 = e0 + e1 >>> 0;
+    t = (e3 ^ e0) >>> 0;
+    e3 = (t << 8 | t >>> 24) >>> 0;
+    e2 = e2 + e3 >>> 0;
+    t = (e1 ^ e2) >>> 0;
+    e1 = (t << 7 | t >>> 25) >>> 0;
+  }
+  const out = new Uint32Array(words), por = BE >> 3;
+  for (let i = 0; i < words; i++) {
+    e0 = e0 + e1 >>> 0;
+    t = (e3 ^ e0) >>> 0;
+    e3 = (t << 16 | t >>> 16) >>> 0;
+    e2 = e2 + e3 >>> 0;
+    t = (e1 ^ e2) >>> 0;
+    e1 = (t << 12 | t >>> 20) >>> 0;
+    e0 = e0 + e1 >>> 0;
+    t = (e3 ^ e0) >>> 0;
+    e3 = (t << 8 | t >>> 24) >>> 0;
+    e2 = e2 + e3 >>> 0;
+    t = (e1 ^ e2) >>> 0;
+    e1 = (t << 7 | t >>> 25) >>> 0;
+    let v = e0;
+    const a = i * por;
+    for (let c = 0; c < por; c++) {
+      const d = r[a + c];
+      v = v + d >>> 0;
+      v = (v << 5 | v >>> 27) >>> 0;
+      v = (v ^ Math.imul(d, HR) >>> 0) >>> 0;
+    }
+    out[i] = (v ^ e2) >>> 0;
+  }
+  return out;
+}
+var leadingZeros = (w) => {
+  let n = 0;
+  for (const x of w) {
+    if (x === 0) {
+      n += 32;
+      continue;
+    }
+    return n + Math.clz32(x);
+  }
+  return n;
+};
+function solvePow(nonce, difficulty, deadline) {
+  if (!(difficulty > 0)) return "0";
+  const words = Math.min(8, (difficulty >> 5) + 1);
+  const pre = nonce + ":";
+  for (let s = 0; s < 5e7; s++) {
+    if (leadingZeros(byseHash(pre + s, words)) >= difficulty) return String(s);
+    if ((s & 2047) === 0 && Date.now() > deadline) return null;
+  }
+  return null;
+}
+var b64urlToBin = (s) => b64decode(String(s || "").replace(/-/g, "+").replace(/_/g, "/"));
+function binToHex(bin) {
+  let h = "";
+  for (let i = 0; i < bin.length; i++) {
+    const x = bin.charCodeAt(i) & 255;
+    h += (x < 16 ? "0" : "") + x.toString(16);
+  }
+  return h;
+}
+function decryptPlayback(pb) {
+  if (!pb || pb.algorithm !== "AES-256-GCM") return null;
+  const v = parseInt(String(pb.version), 10);
+  const parts = pb.key_parts || [];
+  const a = parts[v - 1], b = parts[30 - v];
+  if (typeof a !== "string" || typeof b !== "string") return null;
+  try {
+    const plain = kino.crypto.decrypt("aes-256-gcm", {
+      key: binToHex(b64urlToBin(a) + b64urlToBin(b)),
+      keyEncoding: "hex",
+      iv: binToHex(b64urlToBin(pb.iv)),
+      ivEncoding: "hex",
+      data: binToHex(b64urlToBin(pb.payload)),
+      inputEncoding: "hex",
+      outputEncoding: "utf8"
+    });
+    return JSON.parse(plain);
+  } catch {
+    return null;
+  }
+}
+async function postJson(url, body, headers) {
+  const r = await kino.fetch(url, {
+    method: "POST",
+    headers: { "User-Agent": UA2, Accept: "application/json, text/plain, */*", "Content-Type": "application/json", ...headers || {} },
+    body: body === void 0 ? void 0 : JSON.stringify(body)
+  });
+  const status = r.status;
+  let json = null;
+  try {
+    json = JSON.parse(typeof r.text === "function" ? await r.text() : "");
+  } catch {
+  }
+  return { status, json };
+}
+function cachedToken() {
+  try {
+    const o = JSON.parse(kino.storage.get(TOKEN_KEY) || "null");
+    return o && o.exp > Date.now() ? o.token : null;
+  } catch {
+    return null;
+  }
+}
+function saveToken(token, expiresIn) {
+  try {
+    kino.storage.set(TOKEN_KEY, JSON.stringify({ token, exp: Date.now() + Math.max(6e4, ((Number(expiresIn) || 1800) - 60) * 1e3) }));
+  } catch {
+  }
+}
+function dropToken() {
+  try {
+    kino.storage.remove(TOKEN_KEY);
+  } catch {
+  }
+}
+async function obtainToken(base, id, pageUrl, deadline) {
+  const cached = cachedToken();
+  if (cached) return cached;
+  const headers = { Referer: pageUrl, Origin: base };
+  const cap = (await postJson(`${base}/api/videos/${id}/embed/captcha`, {}, headers)).json;
+  if (!cap || !cap.pow_nonce) return null;
+  const sol = solvePow(cap.pow_nonce, Number(cap.pow_difficulty) || 0, deadline);
+  if (sol == null) return null;
+  const vr = (await postJson(`${base}/api/videos/${id}/embed/captcha/verify`, { pow_token: cap.pow_token, solution: sol }, headers)).json;
+  if (!vr || vr.status !== "ok" || !vr.token) return null;
+  saveToken(vr.token, vr.expires_in);
+  return vr.token;
+}
+async function fetchPlayback(base, id, pageUrl, token) {
+  const fp = { fingerprint: { token: String(token).slice(0, 32), viewer_id: "kino", device_id: "kino", confidence: 1 } };
+  const r = await postJson(`${base}/api/videos/${id}/playback`, fp, { Referer: pageUrl, Origin: base, "X-Captcha-Token": token });
+  if (r.status === 428) return { expired: true };
+  return { pb: r.json && r.json.playback };
+}
+var filemoon_default = {
+  id: "filemoon",
+  match: (url) => RE11.test(hostOf2(url)),
+  async resolve(url) {
+    const base = originOf(url), id = videoId(url);
+    if (!base || !id) return { streams: [], error: "bad_request" };
+    if (!(globalThis.kino && kino.crypto && typeof kino.crypto.decrypt === "function")) return { streams: [], error: "needs_browser" };
+    const pageUrl = `${base}/e/${id}`;
+    const deadline = Date.now() + POW_BUDGET_MS;
+    let token = await obtainToken(base, id, pageUrl, deadline);
+    if (!token) return { streams: [], error: "needs_browser" };
+    let r = await fetchPlayback(base, id, pageUrl, token);
+    if (r.expired) {
+      dropToken();
+      token = await obtainToken(base, id, pageUrl, deadline);
+      if (token) r = await fetchPlayback(base, id, pageUrl, token);
+    }
+    const data = decryptPlayback(r && r.pb);
+    const streams = [];
+    for (const s of data && data.sources || []) {
+      const u = s && (s.file || s.url);
+      if (typeof u === "string" && /^https?:\/\//.test(u)) streams.push({ url: u, kind: /\.m3u8(\?|$)/i.test(u) ? "hls" : "mp4", server: "filemoon", quality: s.label });
+    }
+    return streams.length ? { streams } : { streams: [], error: "needs_browser" };
+  }
+};
+
 // src/registry.js
-var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default];
+var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default];
 function findExtractor(url) {
   return EXTRACTORS.find((e) => {
     try {
@@ -1030,7 +1333,7 @@ var proto_resolver_unpack = (arg) => doUnpack(arg || {});
 var proto_resolver_normalizeHost = (arg) => doNormalizeHost(arg || {});
 var resolve2 = (ref) => resolveContent(ref);
 var slug = (u) => String(u).replace(/[^A-Za-z0-9._~-]/g, "-").slice(0, 128) || "video";
-var hostOf2 = (u) => {
+var hostOf3 = (u) => {
   const m = /^https?:\/\/([^/]+)/i.exec(String(u));
   return m ? m[1] : "Video";
 };
@@ -1045,7 +1348,7 @@ async function search(query) {
   const q = String(query && query.q || "").trim();
   if (!/^https?:\/\//i.test(q)) return [];
   const embeds = await findEmbeds(q);
-  return embeds.length ? [{ id: slug(q), ref: "u|" + q, title: hostOf2(q), kind: "movie" }] : [];
+  return embeds.length ? [{ id: slug(q), ref: "u|" + q, title: hostOf3(q), kind: "movie" }] : [];
 }
 function screen(ctx) {
   const state = ctx && ctx.state || {};
@@ -1062,7 +1365,7 @@ function screen(ctx) {
     ] }
   ];
   const playRef = "u|" + url + (referer.trim() ? "	" + referer.trim() : "");
-  const playButton = (es, en) => ({ type: "ElevatedButton", key: "play", labelText: es, labelTextEn: en, onPressed: { go: { play: { ref: playRef, kind: "movie", id: slug(url), title: hostOf2(url) } } } });
+  const playButton = (es, en) => ({ type: "ElevatedButton", key: "play", labelText: es, labelTextEn: en, onPressed: { go: { play: { ref: playRef, kind: "movie", id: slug(url), title: hostOf3(url) } } } });
   if (result && result.ok) {
     const servers = [...new Set((result.embeds || []).map((e) => e.server))].filter(Boolean).join(", ");
     children.push({ type: "Card", key: "ok", children: [
