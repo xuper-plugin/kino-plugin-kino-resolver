@@ -776,8 +776,35 @@ var wolfstream_default = {
   }
 };
 
+// src/extractors/lulustream.js
+var RE9 = /(?:luluvdo{1,2}|lulustream|luluvid[eo]?s?|lulucdn|hrnyvid|xxvideoss|lulu0?)\.[a-z]{2,}/i;
+var lulustream_default = {
+  id: "lulustream",
+  match: (url) => RE9.test(url),
+  async resolve(url) {
+    const data = await getText(url);
+    if (/Not Found|File was deleted|is no longer available|File not found/i.test(data)) return { streams: [], error: "dead" };
+    let m3u8 = "";
+    try {
+      const packs = multi(data, `text/javascript(?:'|")>(eval.*?)<\/script>`);
+      const dec = String(unpack(packs[packs.length - 1]) || "");
+      m3u8 = single(dec, 'sources:\\s*\\[\\{(?:file|src):"([^"]+)"');
+    } catch {
+    }
+    if (!m3u8) m3u8 = single(data, 'sources:\\s*\\[\\{(?:file|src):"([^"]+)"');
+    if (!m3u8) return { streams: [], error: "needs_browser" };
+    let host;
+    try {
+      host = new URL(url).origin;
+    } catch {
+      host = url.replace(/\/[^/]*$/, "");
+    }
+    return { streams: [{ url: m3u8, kind: streamKind(m3u8), server: "lulustream", referer: host + "/", headers: { Origin: host } }] };
+  }
+};
+
 // src/registry.js
-var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default];
+var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default];
 function findExtractor(url) {
   return EXTRACTORS.find((e) => {
     try {
