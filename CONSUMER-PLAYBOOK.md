@@ -1,9 +1,14 @@
 # Migrating a plugin to consume kino-resolver — playbook
 
 How to make a content plugin (movies/series) stop carrying its own hoster extractors and delegate to the
-shared **kino-resolver** instead. Done for **Latino** (2.5.x) and planned for **HDFull**. Benefits: one
+shared **kino-resolver** instead. Done for **Latino** (2.5.x) and **HDFull** (0.5.7). Benefits: one
 engine, the header/ranking/fast-cut fixes, new hosters for free, far less code, and a 2nd consumer that
-validates the resolver.
+validates the resolver — HDFull's migration alone surfaced two resolver bugs (see §7).
+
+**The door's stream `headers` is a `Header[]` (`[{name,value}]`), never a plain object.** The engine
+normalizes every stream to that and injects the UA, so an extractor may return either shape; but a consumer
+translating the door's output reads `s.headers` as an array (`for (const h of s.headers) out[h.name]=h.value`).
+A stream that reaches the door with object headers is rejected to the caller as **`bad_output`**.
 
 ## 1. The seam — the only real change
 
@@ -52,8 +57,13 @@ ones. (Latino `SERVER_TIER` in src/resolver.js.)
   `ctx.installed`. If `!ctx.installed["xuper-plugin/kino-plugin-kino-resolver"]`, return an install view with a
   button `onPressed: { go: { installPlugin: { repo } } }`; else the normal screen. (Plugins that use `home()`
   instead of `screen` can't host a go-button in a card, so the gate lives in their `screen`.)
+- **Play-ahead (optional)**: Kino pre-resolves a title on its page only when the manifest declares
+  `resolveAhead: true` (Mode.RESOLVE in PlayAhead.kt — "a resolve nobody plays has no effect the person
+  notices"). Without it the log reads `play ahead … nothing got ready ahead (not_declared)` — harmless, the
+  real play just resolves on press. Neither Latino nor HDFull declares it yet; add it for a faster first play
+  once the door path is proven on the plugin.
 
-## 5. What the resolver gives you (0.0.14)
+## 5. What the resolver gives you (0.0.16)
 
 - ~20 inline extractors: voe, streamwish (+vidhide/filelions family), vimeos/zures, fastream, goodstream,
   nupload, mixdrop, lulustream, wolfstream, streamtape, vidoza, uqload, supervideo, mp4upload, streamlare,
@@ -95,6 +105,17 @@ ones. (Latino `SERVER_TIER` in src/resolver.js.)
   gate (452-byte loader → capture is the only way); **vidhide is DOWN globally** (vidhidefast.com NXDOMAIN —
   filelions/vidhidepro all 301 to it); a streamtape "dead" was a real 404. The "slow/cuts" = gate captures +
   dead hosts, not missing headers.
+- **HDFull migration (2026-11-20) found two resolver bugs** — exactly why a 2nd consumer is worth it:
+  1. **vidmoly `normalize` stripped `/embed-`** (the alfa-era shape). `vidmoly.biz/<code>.html` now 404s to
+     notice.php; only `/embed-<code>.html` serves the player (`sources:[{file:'…m3u8'}]`). Every vidmoly copy
+     was resolving to `needs_browser`. Fix: keep the embed path, fix the turnstile-cookie slug (it hardcoded
+     `vidmoly.me`), send a vidmoly `Referer`+`Origin` for the vmpx.online CDN, add a broad `.m3u8` fallback.
+  2. **The engine injected the UA as a plain OBJECT** when an extractor returned no/object headers, but the
+     door's output type is `Header[]` → the consumer got **`bad_output`**. The engine now normalizes every
+     stream's headers to `Header[]`. Any extractor with object headers was affected. (resolver 0.0.16)
+  Method that nailed both: a temporary `[rvtrace]` in the consumer's `viaResolver` logging
+  `embed -> streams=N err=…` (or `THREW <code>`), then fetching the real hoster page from Node (the HOSTER is
+  reachable even when the SOURCE site is CF-blocked) to see what it actually serves vs what the extractor did.
 
 ## 8. References + rules
 
