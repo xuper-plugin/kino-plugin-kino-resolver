@@ -127,6 +127,48 @@ function locationOf(r) {
   return h.location || h.Location || null;
 }
 var streamKind = (u) => /\.m3u8(\?|$)/i.test(u) ? "hls" : /\.mpd(\?|$)/i.test(u) ? "dash" : "mp4";
+function absolute(href, base) {
+  try {
+    return new URL(String(href).replace(/\\\//g, "/"), base).href;
+  } catch {
+    return href || null;
+  }
+}
+var LANG_CODES = [
+  [/^(español|espanol|spanish|castellano|latino|spa|esp?)\b/i, "es"],
+  [/^(english|inglés|ingles|eng?)\b/i, "en"],
+  [/^(portugu[eê]s|portuguese|pt)\b/i, "pt"],
+  [/^(fran[cç]ais|french|franc[eé]s|fre|fra|fr)\b/i, "fr"],
+  [/^(italiano|italian|ita|it)\b/i, "it"],
+  [/^(deutsch|german|alem[aá]n|ger|deu|de)\b/i, "de"]
+];
+function langCode(label) {
+  const s = String(label || "").trim();
+  for (const [re, code] of LANG_CODES) if (re.test(s)) return code;
+  return null;
+}
+function captionTracks(text, base) {
+  const m = /["']?\btracks["']?\s*:\s*\[([\s\S]*?)\]/.exec(String(text || ""));
+  if (!m) return [];
+  const out = [];
+  for (const [obj] of m[1].matchAll(/\{[^{}]*\}/g)) {
+    const field = (k) => (new RegExp(`["']?${k}["']?\\s*:\\s*["']([^"']*)["']`).exec(obj) || [])[1] || "";
+    const kind = field("kind").toLowerCase();
+    if (kind && kind !== "captions" && kind !== "subtitles") continue;
+    const file = field("file");
+    const format = (/\.(vtt|srt)(?:[?#]|$)/i.exec(file) || [])[1];
+    const label = field("label");
+    const lang = langCode(label);
+    const url = format && lang ? absolute(file, base) : null;
+    if (!url || out.some((t) => t.url === url)) continue;
+    out.push({ lang, url, label, format: format.toLowerCase() });
+  }
+  return out;
+}
+function pageSubtitles(html, unpacked, base) {
+  const subs = captionTracks(html, base);
+  return subs.length ? subs : captionTracks(unpacked || "", base);
+}
 var toHeaders = (o) => Object.entries(o || {}).filter(([, v]) => v != null).map(([name, value]) => ({ name, value: String(value) }));
 async function browserCapture(url, { referer, match, timeoutMs } = {}) {
   const b = globalThis.kino && kino.browser;
@@ -224,7 +266,7 @@ var voe_default = {
 };
 
 // src/extractors/streamwish.js
-var RE2 = /stream.?wish|strwish|embedwish|wishembed|awish|dwish|mwish|wishfast|sfastwish|flaswish|obeywish|cdnwish|asnwish|flastwish|jodwish|swhoi|swdyu|wishonly|playerwish|hlswish|iplayerhls|hlsflast|ghbrisk|cybervynx|streamhg|hlsflex|hglink|hgplaycdn|vibuxer|yuguaab|wish|vidhide|filelion|filelions|lionsflix|dhcplay|dhtpre|kravaxxa|smoothpre/i;
+var RE2 = /stream.?wish|strwish|embedwish|wishembed|awish|dwish|mwish|wishfast|sfastwish|flaswish|obeywish|cdnwish|asnwish|flastwish|jodwish|swhoi|swdyu|wishonly|playerwish|hlswish|iplayerhls|hlsflast|ghbrisk|cybervynx|streamhg|hlsflex|hglink|hgplaycdn|vibuxer|yuguaab|wish|vidhide|filelion|filelions|lionsflix|dhcplay|dhtpre|kravaxxa|smoothpre|dintezuvio|minochinos|morencius/i;
 var DOMAINS = [
   "hlswish.com",
   "streamwish.com",
@@ -271,9 +313,12 @@ var streamwish_default = {
     if (/Not Found|File was deleted|is no longer available|temporarily not available/i.test(data)) return { streams: [], error: "dead" };
     try {
       const pack = single(data, "p,a,c,k,e,d.*?<\/script>");
-      const unpacked = unpack(pack);
-      const m3u8 = single(String(unpacked), '(?:file|"hls2"):"([^"]+)"');
-      if (m3u8) return { streams: [{ url: m3u8, kind: "hls", server: "streamwish" }] };
+      const unpacked = String(unpack(pack) || "");
+      const m3u8 = single(unpacked, '(?:file|"hls2"):"([^"]+)"');
+      if (m3u8) {
+        const subtitles = pageSubtitles(data, unpacked, pageUrl);
+        return { streams: [{ url: m3u8, kind: "hls", server: "streamwish", referer: pageUrl }], ...subtitles.length ? { subtitles } : {} };
+      }
     } catch {
     }
     return { streams: [], error: "needs_browser" };
@@ -457,15 +502,17 @@ var fastream_default = {
     if (url.includes("|")) [page, referer] = url.split("|");
     const data = await getText(page, { referer });
     if (/File is no longer available as it expired or has been deleted/i.test(data)) return { streams: [], error: "dead" };
-    let block = "";
+    let block = "", unpacked = "";
     try {
       const packed = single(data, "text/javascript'>(eval.*?)\\s*<\/script>");
-      block = single(unpack(packed), "(?is)sources.+?\\[(.+?)\\]");
+      unpacked = String(unpack(packed) || "");
+      block = single(unpacked, "(?is)sources.+?\\[(.+?)\\]");
     } catch {
     }
     const u = single(block, 'file:"([^"]+)"');
     if (!u) return { streams: [], error: "needs_browser" };
-    return { streams: [{ url: u, kind: "hls", server: "fastream", referer: referer || void 0 }] };
+    const subtitles = pageSubtitles(data, unpacked, page);
+    return { streams: [{ url: u, kind: "hls", server: "fastream", referer: referer || void 0 }], ...subtitles.length ? { subtitles } : {} };
   }
 };
 
@@ -602,8 +649,78 @@ var zures_default = {
   }
 };
 
+// src/extractors/goodstream.js
+var RE5 = /goodstream/i;
+var findM3u8 = (text, base) => {
+  const m = /\bfile\s*:\s*["']([^"']+\.m3u8[^"']*)["']/.exec(String(text || ""));
+  return m ? absolute(m[1], base) : null;
+};
+var goodstream_default = {
+  id: "goodstream",
+  match: (url) => RE5.test(url),
+  async resolve(url) {
+    let page = url, referer;
+    if (url.includes("|")) [page, referer] = url.split("|");
+    const data = await getText(page, { referer: referer || "https://goodstream.one/" });
+    if (/File (is )?(no longer available|not found|was deleted|has been deleted)|Error 404|404 - No encontrado/i.test(data)) return { streams: [], error: "dead" };
+    let unpacked = "";
+    try {
+      unpacked = unpack(data) || "";
+    } catch {
+    }
+    const m3u8 = findM3u8(data, page) || findM3u8(unpacked, page);
+    if (!m3u8) return { streams: [], error: "needs_browser" };
+    const subtitles = pageSubtitles(data, unpacked, page);
+    return {
+      streams: [{ url: m3u8, kind: "hls", server: "goodstream", referer: page, headers: { Origin: "https://goodstream.one" } }],
+      ...subtitles.length ? { subtitles } : {}
+    };
+  }
+};
+
+// src/extractors/nupload.js
+var RE6 = /\bnupload\.(me|my)\b/i;
+var nupload_default = {
+  id: "nupload",
+  match: (url) => RE6.test(url),
+  async resolve(url) {
+    let page = url, referer;
+    if (url.includes("|")) [page, referer] = url.split("|");
+    let origin;
+    try {
+      origin = new URL(page).origin;
+    } catch {
+      return { streams: [], error: "bad_request" };
+    }
+    const html = await getText(page, { referer: referer || origin + "/" });
+    const arr = /([A-Za-z]+)\.forEach\s*\(function\s+\w+\s*\(value\)\s*\{[^}]+atob/.exec(html);
+    if (!arr) return { streams: [], error: "needs_browser" };
+    const name = arr[1];
+    const off = new RegExp(name + "\\.forEach[^-]+-\\s*(\\d+)").exec(html);
+    const list = new RegExp("var\\s+" + name + "\\s*=\\s*(\\[[^\\]]+\\])").exec(html);
+    const sesz = /var sesz\s*=\s*"([^"]+)"/.exec(html);
+    if (!off || !list || !sesz) return { streams: [], error: "needs_browser" };
+    let path = "";
+    try {
+      for (const v of JSON.parse(list[1])) {
+        path += String.fromCharCode(parseInt(b64decode(v).replace(/\D/g, ""), 10) - parseInt(off[1], 10));
+      }
+    } catch {
+      return { streams: [], error: "needs_browser" };
+    }
+    let fileUrl;
+    try {
+      fileUrl = new URL(path + "?s=" + sesz[1], origin).href;
+    } catch {
+      return { streams: [], error: "needs_browser" };
+    }
+    if (!/^https:\/\//i.test(fileUrl)) return { streams: [], error: "needs_browser" };
+    return { streams: [{ url: fileUrl, kind: streamKind(fileUrl), server: "nupload", referer: origin + "/", headers: { Origin: origin } }] };
+  }
+};
+
 // src/registry.js
-var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default];
+var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default];
 function findExtractor(url) {
   return EXTRACTORS.find((e) => {
     try {
