@@ -128,3 +128,46 @@ ones. (Latino `SERVER_TIER` in src/resolver.js.)
   balandro-reference`, `/c/dev/palantir-reference`. Cross-check all three for the best inline logic + newest
   mirrors. See the alfa-family-references memory.
 - Commit/push as **xuper-plugin**, no `Co-Authored-By`. Code/commits in English; user-facing text ES + EN.
+
+## 9. Keeping the resolver present + current (the dependency)
+
+A consumer needs the resolver **installed** and **recent enough**. What Kino does and does NOT give us
+(verified 2026-11-20), and the defense-in-depth that follows:
+
+**Kino's limits (so you don't design around things that aren't there):**
+- `consumes` has **no minVersion** (`ProtocolUse` = alias/repo/door/calls/streams only).
+- The screen's `ctx.installed[repo]` is a **boolean** (keyed by `recommends`), it does **not** carry the version.
+- `go.installPlugin` works **only on the plugin's own screen**, and does **nothing** if the plugin is already
+  installed (it never updates — just a toast).
+- A `settingsAction` can only show a message (≤300 chars) + clear keys — **no `go`, no install, no open-screen**.
+- A playback error's `userMessage` is shown only for the five typed codes **and only if it does not spell
+  "kino"** anywhere (`PluginErrors.safeShape` → `kinoSkeleton`); otherwise Kino shows its own generic line.
+- Kino does **not** install a plugin's `recommends`/`consumes` when the consumer is installed/updated, and has
+  **no "update the dependency with the plugin"** hook.
+
+**"Not installed" — three surfaces, defense in depth:**
+1. **Screen gate** (§4): `screen(ctx)` → install button + donate. One-tap, but only for someone who opens the
+   screen.
+2. **Resolve message** (Latino 2.5.3, HDFull 0.5.10): on `provider_missing`, `resolve()` throws a **shown**
+   `userMessage` routing the person to the screen (where the gate is) — this covers playing from Home / search
+   / a TMDB panel, which never opens the screen. **Word it WITHOUT the engine's brand name** ("el motor de
+   reproducción", not "Kino Resolver"), or Kino drops it. HDFull tags the error (`e.resolverMissing`) so its
+   resolve loop stops at the first copy; Latino (which has a WebView-capture fallback) shows it only when even
+   capture opened nothing AND `resolverInstalled(kino)` is false.
+3. **Settings**: it can't install, so at most a conditional `status` line (via `settingsStatus()` + apiVersion
+   13 `hide`) pointing to the screen. A plugin with `settingsIn: "screen"` (Latino) already routes settings →
+   screen → gate, so a separate status is redundant there.
+
+**"Too old" — self-heals, don't over-engineer:** you can't cleanly detect it (no version in `installed`, no
+minVersion). But Kino **auto-updates installed plugins on app open** (`PluginAutoUpdate`): Kino-signed always;
+community silently when the update adds no permissions/hosts — the resolver's `fetchHosts: "any"` means its
+updates add no hosts, so it qualifies. Keep the door's contract stable so an old resolver *degrades* (fewer
+hosters) rather than breaks, and auto-update carries it forward.
+
+**Root fix (best, and it answers "update the dependency too"):** make the resolver a **default plugin**. Add it
+to **`default-plugins.json`** (schema 1, public repo `kinotvapp/kino-plugins`, read from raw.githubusercontent +
+jsDelivr, cached 12 h): Kino then **auto-installs it for everyone and auto-updates it**, independent of any
+consumer — so the dependency is always present and current, and the three surfaces above become a safety net.
+Entry: `{ "id": "kino-resolver", "repo": "xuper-plugin/kino-plugin-kino-resolver", "required": false }`
+(`required: true` would also hide Desinstalar). It's a **data** change, not a Kino-app change. Owner decision
+(it ships the engine to every device).
