@@ -224,7 +224,7 @@ var voe_default = {
 };
 
 // src/extractors/streamwish.js
-var RE2 = /stream.?wish|strwish|embedwish|wishembed|awish|dwish|mwish|wishfast|sfastwish|flaswish|obeywish|cdnwish|asnwish|flastwish|jodwish|swhoi|swdyu|wishonly|playerwish|hlswish|iplayerhls|hlsflast|ghbrisk|cybervynx|streamhg|hlsflex|hglink|hgplaycdn|vibuxer|yuguaab|wish/i;
+var RE2 = /stream.?wish|strwish|embedwish|wishembed|awish|dwish|mwish|wishfast|sfastwish|flaswish|obeywish|cdnwish|asnwish|flastwish|jodwish|swhoi|swdyu|wishonly|playerwish|hlswish|iplayerhls|hlsflast|ghbrisk|cybervynx|streamhg|hlsflex|hglink|hgplaycdn|vibuxer|yuguaab|wish|vidhide|filelion|filelions|lionsflix|dhcplay|dhtpre|kravaxxa|smoothpre/i;
 var DOMAINS = [
   "hlswish.com",
   "streamwish.com",
