@@ -803,8 +803,29 @@ var lulustream_default = {
   }
 };
 
+// src/extractors/gamovideo.js
+var RE10 = /\bgamovideo\b/i;
+var gamovideo_default = {
+  id: "gamovideo",
+  match: (url) => RE10.test(url),
+  async resolve(url) {
+    const data = await getText(url, { referer: "https://gamovideo.com/" });
+    let file = "";
+    try {
+      file = single(String(unpack(data) || ""), 'file:\\s*"([^"]+)"');
+    } catch {
+    }
+    if (!file) file = single(data, 'file:\\s*"([^"]+)"');
+    if (!file) {
+      if (/File (was deleted|not found|is no longer)|not found|has been removed|404 Not Found/i.test(data)) return { streams: [], error: "dead" };
+      return { streams: [], error: "needs_browser" };
+    }
+    return { streams: [{ url: file, kind: streamKind(file), server: "gamovideo", referer: "https://gamovideo.com/" }] };
+  }
+};
+
 // src/registry.js
-var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default];
+var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default];
 function findExtractor(url) {
   return EXTRACTORS.find((e) => {
     try {
