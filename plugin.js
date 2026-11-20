@@ -720,8 +720,64 @@ var nupload_default = {
   }
 };
 
+// src/extractors/mixdrop.js
+var RE7 = /\b(?:mi+x+dro{1,2}ps?|m1xdrop|mxdrop|mixdrp|mixdropjmk|md3b0j6hj|mdbekjwqa|md[3bfyz][a-z0-9]{5,})\b/i;
+var mixdrop_default = {
+  id: "mixdrop",
+  match: (url) => RE7.test(url),
+  normalize: (url) => url.replace("/f/", "/e/"),
+  async resolve(url) {
+    let data = await getText(url);
+    const loc = single(data, 'window\\.location\\s*=\\s*"([^"]+)"');
+    if (loc) {
+      try {
+        data = await getText(new URL(loc, url).href);
+      } catch {
+      }
+    }
+    if (/>WE ARE SORRY<\/h2>|404 Not Found|File not found|has been removed|no longer available/i.test(data)) return { streams: [], error: "dead" };
+    let media = "";
+    try {
+      for (const pack of multi(data, "(eval.*?)<\/script>")) {
+        const up = String(unpack(pack) || "");
+        for (const v of multi(up, 'MDCore\\.\\w+\\s*=\\s*"([^"]+)"')) {
+          if (/\.mp4/i.test(v)) {
+            media = v;
+            break;
+          }
+        }
+        if (media) break;
+      }
+    } catch {
+    }
+    if (!media) return { streams: [], error: "needs_browser" };
+    if (!/^https?:/i.test(media)) media = "https:" + media;
+    return { streams: [{ url: media, kind: streamKind(media), server: "mixdrop", referer: url }] };
+  }
+};
+
+// src/extractors/wolfstream.js
+var RE8 = /\bwolfstream\b|\baparat\.cam\b/i;
+var wolfstream_default = {
+  id: "wolfstream",
+  match: (url) => RE8.test(url),
+  async resolve(url) {
+    const data = await getText(url);
+    if (/File (was deleted|not found|is no longer)|404 Not Found/i.test(data)) return { streams: [], error: "dead" };
+    let m3u8 = single(data, '\\{file:"([^"]+)"\\}') || single(data, 'file:"([^"]+\\.m3u8[^"]*)"');
+    if (!m3u8) {
+      try {
+        m3u8 = single(String(unpack(single(data, "(eval.*?)<\/script>")) || ""), 'file:"([^"]+\\.m3u8[^"]*)"');
+      } catch {
+      }
+    }
+    if (!m3u8) return { streams: [], error: "needs_browser" };
+    return { streams: [{ url: m3u8, kind: streamKind(m3u8), server: "wolfstream", referer: url }] };
+  }
+};
+
 // src/registry.js
-var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default];
+var EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default];
 function findExtractor(url) {
   return EXTRACTORS.find((e) => {
     try {
