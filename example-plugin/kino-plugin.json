@@ -1,0 +1,34 @@
+{
+  "id": "resolver-demo",
+  "name": "Resolver Demo",
+  "version": "0.1.0",
+  "apiVersion": 20,
+  "entry": "plugin.js",
+  "description": "El plugin más pequeño que usa kino-resolver: busca un titulo de demo y lo reproduce delegando la extraccion en el resolver, con captura de respaldo.",
+  "author": "tu-usuario",
+  "homepage": "https://github.com/xuper-plugin/kino-plugin-kino-resolver",
+
+  "hosts": ["voe.sx", "streamtape.com"],
+  "fetchHosts": "any",
+  "streamHosts": "any",
+  "browser": true,
+
+  "capabilities": ["search", "resolve", "screen"],
+
+  "screen": {
+    "label": "Resolver Demo",
+    "labelEn": "Resolver Demo",
+    "icon": "link",
+    "menuOpens": "screen",
+    "opensFrom": ["menu"]
+  },
+
+  "recommends": ["xuper-plugin/kino-plugin-kino-resolver"],
+  "consumes": {
+    "resolver": {
+      "repo": "xuper-plugin/kino-plugin-kino-resolver",
+      "door": "resolver",
+      "calls": ["resolve"]
+    }
+  }
+}

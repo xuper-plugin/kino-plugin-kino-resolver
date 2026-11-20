@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kino Resolver — docs para desarrolladores</title>
+  <meta name="description" content="Resolvedor universal de hosters/embeds para plugins de Kino. Convierte un enlace de reproductor en streams reproducibles con una sola llamada." />
+  <link rel="icon" href="https://kinotvapp.github.io/kino-plugins/favicon.ico" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/themes/vue.css" />
+  <style>
+    :root {
+      --theme-color: #1E90F8;
+      --theme-color-dark: #8FD0FF;
+    }
+    .app-name-link img { max-width: 160px; }
+    .markdown-section { max-width: 920px; }
+    .markdown-section code { color: #d63384; }
+    .sidebar { background: #0b1020; }
+    .sidebar, .sidebar a { color: #c7d2e5; }
+    .sidebar-nav li.active > a { color: var(--theme-color); border-right: 3px solid var(--theme-color); }
+    .app-name-link { color: #fff !important; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #050B2D; }
+      .markdown-section { color: #dbe4f3; }
+      .content, .markdown-section h1, .markdown-section h2, .markdown-section h3 { color: #eef3fb; }
+      .markdown-section tr { background: transparent; border-top-color: #22305a; }
+      .markdown-section tr:nth-child(2n) { background: #0c1536; }
+      .markdown-section pre, .markdown-section code { background: #0c1536; }
+      .markdown-section code { color: #ff9ec4; }
+      .markdown-section blockquote { background: #0c1536; border-left-color: var(--theme-color); color: #c7d2e5; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">Cargando…</div>
+  <script>
+    window.$docsify = {
+      name: 'Kino Resolver',
+      repo: 'https://github.com/xuper-plugin/kino-plugin-kino-resolver',
+      loadSidebar: true,
+      subMaxLevel: 2,
+      auto2top: true,
+      homepage: 'README.md',
+      search: {
+        placeholder: 'Buscar…',
+        noData: 'Sin resultados.',
+        depth: 3,
+      },
+      copyCode: {
+        buttonText: 'Copiar',
+        successText: 'Copiado',
+      },
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/docsify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/plugins/search.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@3.0.0/dist/docsify-copy-code.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

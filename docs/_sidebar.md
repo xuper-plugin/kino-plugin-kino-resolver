@@ -1,0 +1,9 @@
+- [Inicio](README.md)
+- [Guía rápida (lo mínimo)](README.md#guía-rápida-lo-mínimo)
+- [Catálogo de resolvers](resolvers.md)
+- [Plugins que ya lo usan](examples.md)
+- [Plugin de ejemplo mínimo](example-plugin.md)
+- [Prompt de IA para desarrolladores](ai-prompt.md)
+- **Enlaces**
+- [Docs oficiales de Kino](https://kinotvapp.github.io/kino-plugins/)
+- [Repo del resolver](https://github.com/xuper-plugin/kino-plugin-kino-resolver)
