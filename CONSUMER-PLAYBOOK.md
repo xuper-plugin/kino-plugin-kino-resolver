@@ -56,7 +56,10 @@ ones. (Latino `SERVER_TIER` in src/resolver.js.)
 - **Install gate** (plugins with the `screen` capability): the first screen is `screen(ctx)` and it receives
   `ctx.installed`. If `!ctx.installed["xuper-plugin/kino-plugin-kino-resolver"]`, return an install view with a
   button `onPressed: { go: { installPlugin: { repo } } }`; else the normal screen. (Plugins that use `home()`
-  instead of `screen` can't host a go-button in a card, so the gate lives in their `screen`.)
+  instead of `screen` can't host a go-button in a card, so the gate lives in their `screen`.) **Owner rule:
+  ALWAYS put the author's donate affordance right under the install button** — `supportNode(device)`: a
+  `QrImage` on TV (a TV can't open a link well), a heart `ElevatedButton` → `go: { url: { href } }` to the
+  Ko-fi (`https://ko-fi.com/xuperplugins`) on phone/desktop. (Latino 2.5.2, HDFull 0.5.9.)
 - **Play-ahead**: `"resolveAhead": true` in the manifest lets Kino resolve a title ahead while the person
   reads its page (Mode.RESOLVE in PlayAhead.kt) — dwell → the door resolves in the background → Reproducir
   takes the ready-ahead stream with **0 ms wait**. **It is IGNORED (dropped + a kit-validate warning) beside
