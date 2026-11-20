@@ -448,14 +448,16 @@ var vidmoly_default = {
   id: "vidmoly",
   match: (url) => /vidmoly/i.test(url),
   normalize(url) {
-    let p = url.replace("/embed-", "/").replace("/d/", "/").replace("/w/", "/").replace("/v/", "/");
-    if (!p.includes(".html")) p += ".html";
-    return p;
+    const host = (/https?:\/\/([^/]+)/i.exec(url) || [, "vidmoly.net"])[1];
+    const path = url.replace(/^https?:\/\/[^/]+/i, "");
+    const code = (/\/(?:embed-|w\/|d\/|v\/|e\/)?([A-Za-z0-9]{6,})/i.exec(path) || [])[1];
+    return code ? `https://${host}/embed-${code}.html` : url;
   },
   async resolve(url, { referer } = {}) {
-    const slug2 = url.replace("https://vidmoly.me/", "").replace(".html", "");
-    const data = await getText(url, { referer, headers: { cookie: "cf_turnstile_demo_pass_" + slug2 + "=1" } });
-    if (/\/notice\.php|This video not found/i.test(data)) return { streams: [], error: "dead" };
+    const host = (/https?:\/\/([^/]+)/i.exec(url) || [, "vidmoly.net"])[1];
+    const code = (/\/embed-([A-Za-z0-9]+)/i.exec(url) || [, ""])[1];
+    const data = await getText(url, { referer, headers: { cookie: "cf_turnstile_demo_pass_" + code + "=1" } });
+    if (/\/notice\.php|This video (not found|was deleted|is no longer)/i.test(data)) return { streams: [], error: "dead" };
     if (data.includes(">Security Check<")) return { streams: [], error: "needs_browser" };
     let u = single(data, "sources:.*?file:.*?'(.*?)'.*?,") || single(data, 'sources:.*?file:.*?"(.*?)".*?,');
     if (!u) {
@@ -470,8 +472,10 @@ var vidmoly_default = {
       const bloque = single(d, "sources:\\s*\\[(.*?)\\]");
       u = single(bloque, `file:\\s*["']([^"']+)`);
     }
+    if (!u) u = single(data, `(https?://[^"'\\s]+\\.m3u8[^"'\\s]*)`);
     if (!u) return { streams: [], error: "needs_browser" };
-    return { streams: [{ url: u, kind: "hls", server: "vidmoly", referer: referer || void 0 }] };
+    const origin = "https://" + host;
+    return { streams: [{ url: u, kind: "hls", server: "vidmoly", referer: origin + "/", headers: { Referer: origin + "/", Origin: origin } }] };
   }
 };
 
@@ -847,11 +851,12 @@ async function resolve({ url, referer } = {}) {
     if (r && Array.isArray(r.streams) && r.streams.length) {
       for (const s of r.streams) {
         if (!s.referer) s.referer = target;
-        const arr = Array.isArray(s.headers);
-        const hasUA = arr ? s.headers.some((x) => x && /^user-agent$/i.test(String(x.name))) : !!s.headers && Object.keys(s.headers).some((k) => /^user-agent$/i.test(k));
-        if (!hasUA) {
-          s.headers = arr ? [{ name: "User-Agent", value: UA }, ...s.headers] : { "User-Agent": UA, ...s.headers || {} };
-        }
+        let hs = s.headers;
+        if (Array.isArray(hs)) hs = hs.filter((x) => x && x.name).map((x) => ({ name: String(x.name), value: String(x.value) }));
+        else if (hs && typeof hs === "object") hs = Object.keys(hs).map((k) => ({ name: k, value: String(hs[k]) }));
+        else hs = [];
+        if (!hs.some((x) => /^user-agent$/i.test(x.name))) hs.unshift({ name: "User-Agent", value: UA });
+        s.headers = hs;
       }
       return r;
     }
