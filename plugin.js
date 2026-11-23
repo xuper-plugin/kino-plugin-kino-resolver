@@ -93,8 +93,14 @@ function storageSet(key, value, ttl) {
 function recentlyFailed(host) {
   return host ? !!storageGet(FAIL_PREFIX + host) : false;
 }
-function markFailed(host) {
-  if (host) storageSet(FAIL_PREFIX + host, "1", FAIL_COOLDOWN_MS);
+function markFailed(host, ttl = FAIL_COOLDOWN_MS) {
+  if (host) storageSet(FAIL_PREFIX + host, "1", ttl);
+}
+function knownBrowserHost(host) {
+  return host ? !!storageGet(BROWSER_HOST_PREFIX + host) : false;
+}
+function markBrowserHost(host) {
+  if (host) storageSet(BROWSER_HOST_PREFIX + host, "1", BROWSER_HOST_TTL);
 }
 function isCfChallenge(html, status, headers) {
   const h = headers || {};
@@ -108,7 +114,8 @@ function isCfChallenge(html, status, headers) {
 function classifyCf(html, status, headers) {
   if (!isCfChallenge(html, status, headers)) return null;
   const body = html || "";
-  if (/cf-error-(?:code|details)["'>\s]{0,24}1020/i.test(body) || /\bError\s*1020\b/i.test(body)) return "blocked";
+  if (/cf-error-(?:code|details)["'>\s]{0,24}10[12]0/i.test(body) || /\bError\s*10[12]0\b/i.test(body)) return "blocked";
+  if (/cf-error-(?:code|details)["'>\s]{0,24}1015/i.test(body) || /\bError\s*1015\b/i.test(body)) return "ratelimited";
   if (/cf_captcha_kind/.test(body) || /cdn-cgi\/images\/trace\/(?:captcha|managed)/.test(body) || /orchestrate\/(?:captcha|managed)\/v1/.test(body) || /\b(?:hcaptcha|turnstile)\b/i.test(body)) return "captcha";
   if (/orchestrate\/jsch\/v1/.test(body) || /name="s"\s+value="/.test(body) || /name="r"\s+value="/.test(body)) return "browser";
   if (/name="jschl_vc"/.test(body) && /name="jschl_answer"/.test(body)) return "iuam";
@@ -177,6 +184,10 @@ async function solveIuam(url, html) {
 }
 async function getTextCF(url, { referer, headers, timeoutMs } = {}) {
   const host = hostOf(url);
+  if (knownBrowserHost(host) && !recentlyFailed(host)) {
+    const direct = await tryBrowserPage(url, timeoutMs);
+    if (direct) return direct;
+  }
   const h = {
     ...BROWSER_HEADERS,
     ...referer ? { "Referer": referer, "Sec-Fetch-Site": "cross-site" } : {},
@@ -190,18 +201,25 @@ async function getTextCF(url, { referer, headers, timeoutMs } = {}) {
     markFailed(host);
     return html;
   }
+  if (kind === "ratelimited") {
+    markFailed(host, RATELIMIT_COOLDOWN_MS);
+    return html;
+  }
   if (kind === "iuam") {
     const solved = await solveIuam(url, html);
     if (solved) return solved;
   }
   if (!recentlyFailed(host)) {
     const fromPage = await tryBrowserPage(url, timeoutMs);
-    if (fromPage) return fromPage;
+    if (fromPage) {
+      markBrowserHost(host);
+      return fromPage;
+    }
   }
   markFailed(host);
   return html;
 }
-var UA, BROWSER_HEADERS, IUAM_AUTH_HEADERS, FAIL_PREFIX, FAIL_COOLDOWN_MS;
+var UA, BROWSER_HEADERS, IUAM_AUTH_HEADERS, FAIL_PREFIX, FAIL_COOLDOWN_MS, RATELIMIT_COOLDOWN_MS, BROWSER_HOST_PREFIX, BROWSER_HOST_TTL;
 var init_cloudflare = __esm({
   "src/cloudflare.js"() {
     UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
@@ -228,6 +246,9 @@ var init_cloudflare = __esm({
     };
     FAIL_PREFIX = "cf_fail:";
     FAIL_COOLDOWN_MS = 10 * 60 * 1e3;
+    RATELIMIT_COOLDOWN_MS = 30 * 60 * 1e3;
+    BROWSER_HOST_PREFIX = "cf_browser:";
+    BROWSER_HOST_TTL = 30 * 60 * 1e3;
   }
 });
 
