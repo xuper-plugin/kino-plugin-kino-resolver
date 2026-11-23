@@ -1,7 +1,7 @@
 {
   "id": "kino-resolver",
   "name": "Kino Resolver",
-  "version": "0.0.34",
+  "version": "0.0.35",
   "apiVersion": 20,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -37,7 +37,7 @@
   ],
   "provides": {
     "resolver": {
-      "summary": "Resolve a hoster/embed URL to playable streams, deobfuscate packed JS, normalize a hoster domain",
+      "summary": "Resolve hoster embeds to streams, unpack JS, normalize and rank hosters",
       "calls": {
         "resolve": {
           "in": {
@@ -57,6 +57,12 @@
             "url": "string"
           },
           "out": "NormalizedHost"
+        },
+        "rank": {
+          "in": {
+            "urls": "string[]"
+          },
+          "out": "Ranking"
         }
       },
       "types": {
@@ -83,12 +89,15 @@
         "NormalizedHost": {
           "server": "string",
           "url": "string"
+        },
+        "Ranking": {
+          "scores": "number[]"
         }
       }
     }
   },
   "signature": {
     "authorKey": "6693946bd5c56196960959c4b9665fad5094374bcb85ddb282f8bf762c835263",
-    "value": "07fca15dde77c29bb1e134f74452c7f7ded2e2fc8335641d43e0afb0dfb855b54afa8e41839ffb72608585809fe205e4faed29b5af6f59b6e5580dd42f04b802"
+    "value": "854498de245cdabc543b2d27b6f5512e740a9a8a1508f656b47624db3561b92d42cd831120fa60018cddda794923b6b5372faa510b956ed1cf5de6995ac6d70e"
   }
 }

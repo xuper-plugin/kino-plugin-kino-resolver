@@ -2108,6 +2108,72 @@ var init_registry = __esm({
   }
 });
 
+// src/rank.js
+init_registry();
+var BY_HOST = [
+  [/streamplay|straemplay|powvideo|powwideo/i, 0],
+  // a Google reCAPTCHA v2 before the video
+  [/waaw|hqq\.|netu/i, 2],
+  // a click-on-image human check
+  [/mega\.nz/i, 3],
+  // no extractor (client-side decryption)
+  [/hglink\.to/i, 55],
+  // often answers files the mirrors say are deleted (6 of 7 on 2026-11-23)
+  [/filemoon\.to/i, 40],
+  // 3.1 Mbit/s, 10 s to start
+  [/savefiles/i, 15]
+  // 0.7 Mbit/s
+];
+var BY_EXTRACTOR = {
+  streamwish: 95,
+  // VidHide/StreamWish with hls4: 13-22 Mbit/s, 1.5-3 s to start
+  mixdrop: 85,
+  // 8.7 Mbit/s
+  streamtape: 85,
+  // 8-9 Mbit/s
+  doodstream: 80,
+  // 6-9 Mbit/s
+  filemoon: 75,
+  // bysekoze/bysewihe 7-7.5 Mbit/s
+  voe: 72,
+  // 5.8 Mbit/s, 4 s, 14 of 18 resolved
+  lulustream: 70,
+  // 5-6 Mbit/s 1080p
+  okru: 65,
+  // 6.7 Mbit/s, many blocked files
+  hexload: 60,
+  // 5.3 Mbit/s
+  vidguard: 55,
+  zures: 45,
+  // vimeos 3.9 Mbit/s
+  vidara: 40,
+  // 2.6 Mbit/s
+  uqload: 35,
+  // 1.4-2.7 Mbit/s
+  mp4upload: 30,
+  // 2.8 Mbit/s, 11 s to start
+  fastream: 25
+  // 1.2 Mbit/s
+};
+var UNMEASURED = 50;
+var UNKNOWN = 10;
+function hostScore(url) {
+  const u = String(url || "");
+  for (const [re, score] of BY_HOST) if (re.test(u)) return score;
+  let ex = null;
+  try {
+    ex = findExtractor(u);
+  } catch {
+    ex = null;
+  }
+  if (!ex) return UNKNOWN;
+  return Object.prototype.hasOwnProperty.call(BY_EXTRACTOR, ex.id) ? BY_EXTRACTOR[ex.id] : UNMEASURED;
+}
+function rank({ urls } = {}) {
+  const list = Array.isArray(urls) ? urls.slice(0, 64).map(String) : [];
+  return { scores: list.map(hostScore) };
+}
+
 // src/engine.js
 init_lib();
 init_registry();
@@ -2235,6 +2301,7 @@ async function resolveContent(ref) {
 var proto_resolver_resolve = (arg) => resolve(arg || {});
 var proto_resolver_unpack = (arg) => doUnpack(arg || {});
 var proto_resolver_normalizeHost = (arg) => doNormalizeHost(arg || {});
+var proto_resolver_rank = (arg) => rank(arg || {});
 var resolve2 = (ref) => resolveContent(ref);
 var slug = (u) => String(u).replace(/[^A-Za-z0-9._~-]/g, "-").slice(0, 128) || "video";
 var hostOf4 = (u) => {
@@ -2302,6 +2369,7 @@ async function screenEvent(ctx) {
 }
 export {
   proto_resolver_normalizeHost,
+  proto_resolver_rank,
   proto_resolver_resolve,
   proto_resolver_unpack,
   resolve2 as resolve,
