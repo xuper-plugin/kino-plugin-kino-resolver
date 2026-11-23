@@ -1293,14 +1293,32 @@ function dropToken() {
   } catch {
   }
 }
+function powTooSlowHere() {
+  try {
+    const at = Number(kino.storage.get(SLOW_KEY) || 0);
+    return at > 0 && Date.now() - at < SLOW_MS;
+  } catch {
+    return false;
+  }
+}
+function markPowTooSlow() {
+  try {
+    kino.storage.set(SLOW_KEY, String(Date.now()));
+  } catch {
+  }
+}
 async function obtainToken(base, id, pageUrl, deadline) {
   const cached = cachedToken();
   if (cached) return cached;
+  if (powTooSlowHere()) return null;
   const headers = { Referer: pageUrl, Origin: base };
   const cap = (await postJson(`${base}/api/videos/${id}/embed/captcha`, {}, headers)).json;
   if (!cap || !cap.pow_nonce) return null;
   const sol = solvePow(cap.pow_nonce, Number(cap.pow_difficulty) || 0, deadline);
-  if (sol == null) return null;
+  if (sol == null) {
+    markPowTooSlow();
+    return null;
+  }
   const vr = (await postJson(`${base}/api/videos/${id}/embed/captcha/verify`, { pow_token: cap.pow_token, solution: sol }, headers)).json;
   if (!vr || vr.status !== "ok" || !vr.token) return null;
   saveToken(vr.token, vr.expires_in);
@@ -1312,7 +1330,7 @@ async function fetchPlayback(base, id, pageUrl, token) {
   if (r.status === 428) return { expired: true };
   return { pb: r.json && r.json.playback };
 }
-var RE11, UA2, POW_BUDGET_MS, TOKEN_KEY, hostOf2, originOf, videoId, BE, LT, LR, HR, leadingZeros, b64urlToBin, filemoon_default;
+var RE11, UA2, POW_BUDGET_MS, TOKEN_KEY, hostOf2, originOf, videoId, BE, LT, LR, HR, leadingZeros, b64urlToBin, SLOW_KEY, SLOW_MS, filemoon_default;
 var init_filemoon = __esm({
   "src/extractors/filemoon.js"() {
     init_lib();
@@ -1352,6 +1370,8 @@ var init_filemoon = __esm({
       return n;
     };
     b64urlToBin = (s) => b64decode(String(s || "").replace(/-/g, "+").replace(/_/g, "/"));
+    SLOW_KEY = "filemoonPowSlow1";
+    SLOW_MS = 30 * 60 * 1e3;
     filemoon_default = {
       id: "filemoon",
       match: (url) => RE11.test(hostOf2(url)),
