@@ -510,6 +510,22 @@ function candidates(url) {
   const out = vid && !list.includes(own) ? [...mirrors, url] : [url, ...mirrors];
   return out.slice(0, MAX_TRIES);
 }
+function playerLinks(unpacked, pageUrl) {
+  const out = [];
+  const add = (raw) => {
+    if (!raw) return;
+    let u = null;
+    try {
+      u = new URL(String(raw).replace(/\\\//g, "/"), pageUrl).href;
+    } catch {
+      u = null;
+    }
+    if (u && /^https:\/\//.test(u) && !out.includes(u)) out.push(u);
+  };
+  for (const key of ["hls4", "hls3", "hls2"]) add(single(unpacked, `"${key}"\\s*:\\s*"([^"]+)"`));
+  add(single(unpacked, 'file\\s*:\\s*"([^"]+\\.m3u8[^"]*)"'));
+  return out;
+}
 async function tryPage(url) {
   let pageUrl = url;
   try {
@@ -522,10 +538,11 @@ async function tryPage(url) {
     if (DEAD.test(data) && !/p,a,c,k,e,d/.test(data)) return "dead";
     const pack = single(data, "p,a,c,k,e,d.*?<\/script>");
     const unpacked = String(unpack(pack) || "");
-    const m3u8 = single(unpacked, '(?:file|"hls2"):"([^"]+)"');
-    if (!m3u8) return null;
+    const urls = playerLinks(unpacked, pageUrl);
+    if (!urls.length) return null;
     const subtitles = pageSubtitles(data, unpacked, pageUrl);
-    return { streams: [{ url: m3u8, kind: "hls", server: VIDHIDE_RE.test(url) ? "vidhide" : "streamwish", referer: pageUrl }], ...subtitles.length ? { subtitles } : {} };
+    const server = VIDHIDE_RE.test(url) ? "vidhide" : "streamwish";
+    return { streams: urls.map((u) => ({ url: u, kind: "hls", server, referer: pageUrl })), ...subtitles.length ? { subtitles } : {} };
   } catch {
     return null;
   }
