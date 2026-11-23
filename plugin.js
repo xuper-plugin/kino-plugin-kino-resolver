@@ -1500,6 +1500,83 @@ var init_sendvid = __esm({
   }
 });
 
+// src/extractors/turboembed.js
+function keys(host, nowMs = Date.now()) {
+  return {
+    key: fit32(hexCodePoints(KEY_CHARS) + Math.floor(nowMs / 864e5).toString(16)),
+    iv: fit32(hexCodePoints(SALT_CHARS) + utf8Hex(host))
+  };
+}
+function idOf3(url) {
+  try {
+    return new URL(url).pathname.split("/").filter(Boolean).pop() || null;
+  } catch {
+    return null;
+  }
+}
+var RE15, KEY_CHARS, SALT_CHARS, hexCodePoints, fit32, utf8Hex, aes, turboembed_default;
+var init_turboembed = __esm({
+  "src/extractors/turboembed.js"() {
+    init_lib();
+    RE15 = /(^|\/\/|\.)turboembed\.com\//i;
+    KEY_CHARS = ["𝕊", "𝔼", "𝕮", "𝚁", "𝔼", "𝚃", "𝓚", "𝓔", "𝓨", "𝟙", "𝟚", "𝟛"];
+    SALT_CHARS = ["🔐", "🗝️", "🔑", "🚪", "🛡️", "⚡"];
+    hexCodePoints = (list) => list.map((c) => c.codePointAt(0).toString(16)).join("");
+    fit32 = (h) => h.length > 32 ? h.slice(0, 32) : h.padEnd(32, "0");
+    utf8Hex = (s) => Array.from(new TextEncoder().encode(s)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    aes = (dir, k, data, inputEncoding, outputEncoding) => kino.crypto[dir]("aes-128-cbc", {
+      key: k.key,
+      keyEncoding: "hex",
+      iv: k.iv,
+      ivEncoding: "hex",
+      data,
+      inputEncoding,
+      outputEncoding
+    });
+    turboembed_default = {
+      id: "turboembed",
+      match: (url) => RE15.test(url),
+      normalize: (url) => String(url || "").trim(),
+      async resolve(url) {
+        if (!(globalThis.kino && kino.crypto && typeof kino.crypto.encrypt === "function")) return { streams: [], error: "needs_browser" };
+        const id = idOf3(url);
+        let host = "turboembed.com";
+        try {
+          host = new URL(url).hostname;
+        } catch {
+        }
+        if (!id) return { streams: [], error: "dead" };
+        const k = keys(host);
+        let r;
+        try {
+          const c = aes("encrypt", k, id, "utf8", "hex");
+          r = await kino.fetch(`https://${host}/api/stream/tracking?c=${c}`, {
+            headers: { "User-Agent": UA, Referer: `https://${host}/${id}`, Accept: "application/json, text/plain, */*" },
+            timeoutMs: 8e3
+          });
+        } catch {
+          return { streams: [], error: "needs_browser" };
+        }
+        const h = r && r.headers || {};
+        const sealed = h["x-tracking"] || h["X-Tracking"] || "";
+        if (!sealed) return { streams: [], error: r && (r.status === 404 || r.status === 410) ? "dead" : "needs_browser" };
+        let stream;
+        try {
+          stream = JSON.parse(aes("decrypt", k, sealed, "hex", "utf8")).stream || {};
+        } catch {
+          return { streams: [], error: "needs_browser" };
+        }
+        const headers = [{ name: "User-Agent", value: UA }];
+        const referer = `https://${host}/`;
+        const streams = [];
+        if (typeof stream.hls === "string" && /^https:\/\//.test(stream.hls)) streams.push({ url: stream.hls, kind: "hls", server: "turboembed", referer, headers });
+        if (typeof stream.tiktok === "string" && /^https:\/\//.test(stream.tiktok)) streams.push({ url: stream.tiktok, kind: "hls", server: "turboembed", referer, headers });
+        return streams.length ? { streams } : { streams: [], error: "dead" };
+      }
+    };
+  }
+});
+
 // src/registry.js
 var registry_exports = {};
 __export(registry_exports, {
@@ -1544,7 +1621,8 @@ var init_registry = __esm({
     init_savefiles();
     init_rpmvid();
     init_sendvid();
-    EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default, savefiles_default, rpmvid_default, sendvid_default];
+    init_turboembed();
+    EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default, savefiles_default, rpmvid_default, sendvid_default, turboembed_default];
   }
 });
 
