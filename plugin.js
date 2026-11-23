@@ -363,7 +363,7 @@ async function browserCapture(url, { referer, match, timeoutMs } = {}) {
   }
   return out;
 }
-var single, multi, B64, streamKind, LANG_CODES, toHeaders;
+var single, multi, B64, streamKind, DECOY_RE, isDecoyStream, LANG_CODES, toHeaders;
 var init_lib = __esm({
   "src/lib.js"() {
     init_jsunpack();
@@ -385,6 +385,8 @@ var init_lib = __esm({
     };
     B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     streamKind = (u) => /\.m3u8(\?|$)/i.test(u) ? "hls" : /\.mpd(\?|$)/i.test(u) ? "dash" : "mp4";
+    DECOY_RE = /big[-_ ]?buck[-_ ]?bunny|bbb[-_]?sunflower|[-_/]bbb\.(?:m3u8|mp4)|\/bbb\/|gtv-videos-bucket|sample-videos\.com/i;
+    isDecoyStream = (u) => DECOY_RE.test(String(u || ""));
     LANG_CODES = [
       [/^(español|espanol|spanish|castellano|latino|spa|esp?)\b/i, "es"],
       [/^(english|inglés|ingles|eng?)\b/i, "en"],
@@ -434,15 +436,28 @@ var init_voe = __esm({
       async resolve(url) {
         let data = await getTextCF(url);
         if (/File not found|File is no longer available|Error 404|404 - No encontrado/i.test(data)) return { streams: [], error: "dead" };
+        let origin = (() => {
+          try {
+            return new URL(url).origin + "/";
+          } catch {
+            return "https://voe.sx/";
+          }
+        })();
         if (data.includes("permanentToken") || data.includes("Redirecting")) {
           const r = single(data, "window\\.location\\.href\\s*=\\s*'(https?://[^']+)'");
-          if (r) data = await getTextCF(r, { referer: "https://voe.sx/" });
+          if (r) {
+            data = await getTextCF(r, { referer: origin });
+            try {
+              origin = new URL(r).origin + "/";
+            } catch {
+            }
+          }
         }
         const dec = voeDecode(data);
         if (dec) {
           const streams2 = [];
-          if (dec.source) streams2.push({ url: dec.source, kind: streamKind(dec.source), server: "voe", referer: "https://voe.sx/" });
-          if (dec.direct_access_url && dec.direct_access_url !== dec.source) streams2.push({ url: dec.direct_access_url, kind: streamKind(dec.direct_access_url), server: "voe", referer: "https://voe.sx/" });
+          if (dec.source) streams2.push({ url: dec.source, kind: streamKind(dec.source), server: "voe", referer: origin });
+          if (dec.direct_access_url && dec.direct_access_url !== dec.source) streams2.push({ url: dec.direct_access_url, kind: streamKind(dec.direct_access_url), server: "voe", referer: origin });
           if (streams2.length) return { streams: streams2 };
         }
         let srcs = multi(data, "(?:mp4|hls)': '([^']+)'");
@@ -1840,6 +1855,9 @@ async function resolve({ url, referer } = {}) {
   try {
     const r = await ex.resolve(target, { referer });
     if (r && Array.isArray(r.streams) && r.streams.length) {
+      const real = r.streams.filter((s) => !isDecoyStream(s && s.url));
+      if (!real.length) return { streams: [], error: "needs_browser" };
+      r.streams = real;
       for (const s of r.streams) {
         if (!s.referer) s.referer = target;
         let hs = s.headers;
