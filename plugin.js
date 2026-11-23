@@ -219,14 +219,15 @@ async function getTextCF(url, { referer, headers, timeoutMs } = {}) {
   markFailed(host);
   return html;
 }
-var UA, BROWSER_HEADERS, IUAM_AUTH_HEADERS, FAIL_PREFIX, FAIL_COOLDOWN_MS, RATELIMIT_COOLDOWN_MS, BROWSER_HOST_PREFIX, BROWSER_HOST_TTL;
+var UA, ACCEPT_LANGUAGE, BROWSER_HEADERS, IUAM_AUTH_HEADERS, FAIL_PREFIX, FAIL_COOLDOWN_MS, RATELIMIT_COOLDOWN_MS, BROWSER_HOST_PREFIX, BROWSER_HOST_TTL;
 var init_cloudflare = __esm({
   "src/cloudflare.js"() {
     UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+    ACCEPT_LANGUAGE = "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7";
     BROWSER_HEADERS = {
       "User-Agent": UA,
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Accept-Language": ACCEPT_LANGUAGE,
       "Accept-Encoding": "gzip, deflate",
       "Upgrade-Insecure-Requests": "1",
       "Sec-Fetch-Dest": "document",
@@ -237,7 +238,7 @@ var init_cloudflare = __esm({
     IUAM_AUTH_HEADERS = {
       "User-Agent": UA,
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Accept-Language": ACCEPT_LANGUAGE,
       "Accept-Encoding": "gzip, deflate",
       "Upgrade-Insecure-Requests": "1",
       "Sec-Fetch-Dest": "document",
@@ -2128,6 +2129,7 @@ async function resolve({ url, referer } = {}) {
         else if (hs && typeof hs === "object") hs = Object.keys(hs).map((k) => ({ name: k, value: String(hs[k]) }));
         else hs = [];
         if (!hs.some((x) => /^user-agent$/i.test(x.name))) hs.unshift({ name: "User-Agent", value: UA });
+        if (!hs.some((x) => /^accept-language$/i.test(x.name))) hs.push({ name: "Accept-Language", value: ACCEPT_LANGUAGE });
         s.headers = hs;
       }
       return r;
