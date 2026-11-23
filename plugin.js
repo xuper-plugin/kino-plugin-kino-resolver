@@ -699,6 +699,7 @@ var init_mp4upload = __esm({
         return p;
       },
       async resolve(url) {
+        if (/embed-undef(?:ined)?.html/i.test(String(url))) return { streams: [], error: "dead" };
         let data = await getTextCF(url);
         data = data.replace(/\n|\r|\t|\s{2}|&nbsp;/g, "");
         if (data === "File was deleted" || data === "") return { streams: [], error: "dead" };
@@ -2167,7 +2168,7 @@ var BY_NAME = [
   [/^(?:fmoon|filemoon|moonplayer)$/, "filemoon"],
   [/^(?:swish|streamwish|wish|vhide|vidhide|filelions?)$/, "streamwish"],
   [/^(?:dood|doodstream|ds2play|dsvplay)$/, "doodstream"],
-  [/^(?:mixdrop|mdrop)$/, "mixdrop"],
+  [/^(?:mixdrop|mixdropp|mxdrop|mdrop)$/, "mixdrop"],
   [/^(?:stape|streamtape)$/, "streamtape"],
   [/^mp4upload$/, "mp4upload"],
   [/^uqload$/, "uqload"],
