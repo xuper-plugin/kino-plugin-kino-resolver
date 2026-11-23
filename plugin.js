@@ -581,6 +581,17 @@ function playerLinks(unpacked, pageUrl) {
   add(single(unpacked, 'file\\s*:\\s*"([^"]+\\.m3u8[^"]*)"'));
   return out;
 }
+async function answeringFirst(urls, referer, ask = askPlaylist) {
+  if (urls.length < 2) return urls;
+  const ok = await Promise.all(urls.map((u) => ask(u, referer).catch(() => false)));
+  const good = urls.filter((_, i) => ok[i]);
+  return good.length ? [...good, ...urls.filter((_, i) => !ok[i])] : urls;
+}
+async function askPlaylist(url, referer) {
+  const r = await globalThis.kino.fetch(url, { headers: { "User-Agent": UA, Referer: referer }, timeoutMs: PROBE_MS });
+  if (!r || !r.ok) return false;
+  return /#EXTM3U/.test(String(await r.text()).slice(0, 200));
+}
 async function tryPage(url) {
   let pageUrl = url;
   try {
@@ -593,8 +604,9 @@ async function tryPage(url) {
     if (DEAD.test(data) && !/p,a,c,k,e,d/.test(data)) return "dead";
     const pack = single(data, "p,a,c,k,e,d.*?<\/script>");
     const unpacked = String(unpack(pack) || "");
-    const urls = playerLinks(unpacked, pageUrl);
-    if (!urls.length) return null;
+    const found = playerLinks(unpacked, pageUrl);
+    if (!found.length) return null;
+    const urls = await answeringFirst(found, pageUrl);
     const subtitles = pageSubtitles(data, unpacked, pageUrl);
     const server = VIDHIDE_RE.test(url) ? "vidhide" : "streamwish";
     return { streams: urls.map((u) => ({ url: u, kind: "hls", server, referer: pageUrl })), ...subtitles.length ? { subtitles } : {} };
@@ -602,7 +614,7 @@ async function tryPage(url) {
     return null;
   }
 }
-var RE2, VIDHIDE_RE, WISH_MIRRORS, VIDHIDE_MIRRORS, MAX_TRIES, PAGE_MS, GATE, DEAD, streamwish_default;
+var RE2, VIDHIDE_RE, WISH_MIRRORS, VIDHIDE_MIRRORS, MAX_TRIES, PAGE_MS, GATE, DEAD, PROBE_MS, streamwish_default;
 var init_streamwish = __esm({
   "src/extractors/streamwish.js"() {
     init_lib();
@@ -614,6 +626,7 @@ var init_streamwish = __esm({
     PAGE_MS = 5e3;
     GATE = /Page is loading, please wait|<title>Loading\.\.\.<\/title>/i;
     DEAD = /Not Found|File was deleted|is no longer available|temporarily not available/i;
+    PROBE_MS = 4e3;
     streamwish_default = {
       id: "streamwish",
       match: (url) => RE2.test(url),
