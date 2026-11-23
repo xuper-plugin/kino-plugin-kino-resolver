@@ -70,28 +70,66 @@ var init_jsunpack = __esm({
 });
 
 // src/cloudflare.js
+function hostOf(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+}
+function storageGet(key) {
+  try {
+    return kino?.storage && typeof kino.storage.get === "function" ? kino.storage.get(key) : null;
+  } catch {
+    return null;
+  }
+}
+function storageSet(key, value, ttl) {
+  try {
+    if (kino?.storage && typeof kino.storage.set === "function") kino.storage.set(key, value, ttl);
+  } catch {
+  }
+}
+function recentlyFailed(host) {
+  return host ? !!storageGet(FAIL_PREFIX + host) : false;
+}
+function markFailed(host) {
+  if (host) storageSet(FAIL_PREFIX + host, "1", FAIL_COOLDOWN_MS);
+}
 function isCfChallenge(html, status, headers) {
   const h = headers || {};
+  const server = String(h["server"] || h["Server"] || "").toLowerCase();
   const cfRay = h["cf-ray"] || h["CF-RAY"];
-  if ((status === 403 || status === 503 || status === 429) && cfRay) return true;
+  const cfSignal = server === "cloudflare" || !!cfRay;
+  if ((status === 403 || status === 503 || status === 429) && cfSignal) return true;
   if (!html) return false;
-  return /cf\.chl_opt\b/.test(html) || /<title>Just a moment\.\.\.<\/title>/i.test(html) || /Checking your browser before accessing/i.test(html) || /__cf_chl_jschl_tk__/.test(html) || /challenge-form/.test(html) || /cf-browser-verification/.test(html) || /cdn-cgi\/challenge-platform/.test(html) || // Also catches generic "5-second check" pages some hosters put in front
-  /DDoS protection by Cloudflare/i.test(html);
+  return /cf\.chl_opt\b/.test(html) || /<title>Just a moment\.\.\.<\/title>/i.test(html) || /Checking your browser before accessing/i.test(html) || /__cf_chl_(?:jschl_tk|f_tk|tk)/.test(html) || /challenge-form/.test(html) || /cf-browser-verification/.test(html) || /cdn-cgi\/challenge-platform/.test(html) || /DDoS protection by Cloudflare/i.test(html);
 }
-function isIuamV2(html) {
-  return /name="s"\s+value="/.test(html) || /name="r"\s+value="/.test(html);
+function classifyCf(html, status, headers) {
+  if (!isCfChallenge(html, status, headers)) return null;
+  const body = html || "";
+  if (/cf-error-(?:code|details)["'>\s]{0,24}1020/i.test(body) || /\bError\s*1020\b/i.test(body)) return "blocked";
+  if (/cf_captcha_kind/.test(body) || /cdn-cgi\/images\/trace\/(?:captcha|managed)/.test(body) || /orchestrate\/(?:captcha|managed)\/v1/.test(body) || /\b(?:hcaptcha|turnstile)\b/i.test(body)) return "captcha";
+  if (/orchestrate\/jsch\/v1/.test(body) || /name="s"\s+value="/.test(body) || /name="r"\s+value="/.test(body)) return "browser";
+  if (/name="jschl_vc"/.test(body) && /name="jschl_answer"/.test(body)) return "iuam";
+  return "browser";
 }
 async function tryBrowserPage(url, timeoutMs) {
   const bp = globalThis.kino?.browser?.page;
   if (typeof bp !== "function") return null;
   try {
-    const r = await bp(url, { timeoutMs: Math.min(timeoutMs || 2e4, 2e4) });
+    const r = await bp(url, { timeoutMs: Math.min(timeoutMs || 2e4, 2e4), userAgent: UA });
     const html = r?.html ?? null;
     if (html && !isCfChallenge(html, 200, {})) return html;
     return null;
   } catch {
     return null;
   }
+}
+function challengeDelayMs(html) {
+  const m = /submit\(\);?\s*}?\s*,\s*([0-9]{3,5})\)/.exec(html) || /},\s*([0-9]{3,5})\);/.exec(html);
+  const ms = m ? parseInt(m[1], 10) : NaN;
+  return isFinite(ms) && ms >= 1e3 && ms <= 15e3 ? ms + 150 : 4100;
 }
 function parseIuamChallenge(html, url) {
   try {
@@ -112,19 +150,13 @@ function parseIuamChallenge(html, url) {
   }
 }
 async function solveIuam(url, html) {
-  if (isIuamV2(html)) return null;
   const ch = parseIuamChallenge(html, url);
   if (!ch) return null;
-  await new Promise((ok) => setTimeout(ok, 4100));
+  await new Promise((ok) => setTimeout(ok, challengeDelayMs(html)));
   const checkBase = `${ch.protocol}//${ch.host}/cdn-cgi/l/chk_jschl`;
   const qparams = `jschl_vc=${encodeURIComponent(ch.vc)}&pass=${encodeURIComponent(ch.pass)}&jschl_answer=${encodeURIComponent(ch.answer)}`;
   const attempts = [
-    // GET: params in query string
-    () => kino.fetch(`${checkBase}?${qparams}`, {
-      headers: { ...IUAM_AUTH_HEADERS, "Referer": url },
-      redirect: "follow"
-    }),
-    // POST: params in body, URL only has the base path
+    () => kino.fetch(`${checkBase}?${qparams}`, { headers: { ...IUAM_AUTH_HEADERS, "Referer": url }, redirect: "follow" }),
     () => kino.fetch(checkBase, {
       method: "POST",
       headers: { ...IUAM_AUTH_HEADERS, "Referer": url },
@@ -144,6 +176,7 @@ async function solveIuam(url, html) {
   return null;
 }
 async function getTextCF(url, { referer, headers, timeoutMs } = {}) {
+  const host = hostOf(url);
   const h = {
     ...BROWSER_HEADERS,
     ...referer ? { "Referer": referer, "Sec-Fetch-Site": "cross-site" } : {},
@@ -151,14 +184,24 @@ async function getTextCF(url, { referer, headers, timeoutMs } = {}) {
   };
   const r = await kino.fetch(url, { headers: h, ...timeoutMs ? { timeoutMs } : {} });
   const html = typeof r.text === "function" ? await r.text() : "";
-  if (!isCfChallenge(html, r.status, r.headers)) return html;
-  const fromPage = await tryBrowserPage(url, timeoutMs);
-  if (fromPage) return fromPage;
-  const fromIuam = await solveIuam(url, html);
-  if (fromIuam) return fromIuam;
+  const kind = classifyCf(html, r.status, r.headers);
+  if (!kind) return html;
+  if (kind === "blocked") {
+    markFailed(host);
+    return html;
+  }
+  if (kind === "iuam") {
+    const solved = await solveIuam(url, html);
+    if (solved) return solved;
+  }
+  if (!recentlyFailed(host)) {
+    const fromPage = await tryBrowserPage(url, timeoutMs);
+    if (fromPage) return fromPage;
+  }
+  markFailed(host);
   return html;
 }
-var UA, BROWSER_HEADERS, IUAM_AUTH_HEADERS;
+var UA, BROWSER_HEADERS, IUAM_AUTH_HEADERS, FAIL_PREFIX, FAIL_COOLDOWN_MS;
 var init_cloudflare = __esm({
   "src/cloudflare.js"() {
     UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
@@ -183,6 +226,8 @@ var init_cloudflare = __esm({
       "Sec-Fetch-Mode": "navigate",
       "Sec-Fetch-Site": "same-origin"
     };
+    FAIL_PREFIX = "cf_fail:";
+    FAIL_COOLDOWN_MS = 10 * 60 * 1e3;
   }
 });
 
@@ -1119,7 +1164,7 @@ var init_gamovideo = __esm({
 });
 
 // src/extractors/doodstream.js
-function hostOf(url) {
+function hostOf2(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {
@@ -1166,7 +1211,7 @@ var init_doodstream = __esm({
     doodstream_default = {
       id: "doodstream",
       match(url) {
-        const h = hostOf(url);
+        const h = hostOf2(url);
         return HOSTS.has(h) || /dood/i.test(h);
       },
       normalize: (url) => String(url).replace("/d/", "/e/"),
@@ -1442,7 +1487,7 @@ async function fetchPlayback(base, id, pageUrl, token) {
   if (r.status === 428) return { expired: true };
   return { pb: r.json && r.json.playback };
 }
-var RE11, UA2, POW_BUDGET_MS, TOKEN_KEY, hostOf2, originOf, videoId, BE, LT, LR, HR, leadingZeros, b64urlToBin, SLOW_KEY, SLOW_MS, filemoon_default;
+var RE11, UA2, POW_BUDGET_MS, TOKEN_KEY, hostOf3, originOf, videoId, BE, LT, LR, HR, leadingZeros, b64urlToBin, SLOW_KEY, SLOW_MS, filemoon_default;
 var init_filemoon = __esm({
   "src/extractors/filemoon.js"() {
     init_lib();
@@ -1450,7 +1495,7 @@ var init_filemoon = __esm({
     UA2 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
     POW_BUDGET_MS = 2e4;
     TOKEN_KEY = "fm:captchaToken";
-    hostOf2 = (url) => {
+    hostOf3 = (url) => {
       try {
         return new URL(url).hostname.replace(/^www\./, "");
       } catch {
@@ -1486,7 +1531,7 @@ var init_filemoon = __esm({
     SLOW_MS = 30 * 60 * 1e3;
     filemoon_default = {
       id: "filemoon",
-      match: (url) => RE11.test(hostOf2(url)),
+      match: (url) => RE11.test(hostOf3(url)),
       async resolve(url) {
         const base = originOf(url), id = videoId(url);
         if (!base || !id) return { streams: [], error: "bad_request" };
@@ -1888,7 +1933,7 @@ var proto_resolver_unpack = (arg) => doUnpack(arg || {});
 var proto_resolver_normalizeHost = (arg) => doNormalizeHost(arg || {});
 var resolve2 = (ref) => resolveContent(ref);
 var slug = (u) => String(u).replace(/[^A-Za-z0-9._~-]/g, "-").slice(0, 128) || "video";
-var hostOf3 = (u) => {
+var hostOf4 = (u) => {
   const m = /^https?:\/\/([^/]+)/i.exec(String(u));
   return m ? m[1] : "Video";
 };
@@ -1903,7 +1948,7 @@ async function search(query) {
   const q = String(query && query.q || "").trim();
   if (!/^https?:\/\//i.test(q)) return [];
   const embeds = await findEmbeds(q);
-  return embeds.length ? [{ id: slug(q), ref: "u|" + q, title: hostOf3(q), kind: "movie" }] : [];
+  return embeds.length ? [{ id: slug(q), ref: "u|" + q, title: hostOf4(q), kind: "movie" }] : [];
 }
 function screen(ctx) {
   const state = ctx && ctx.state || {};
@@ -1920,7 +1965,7 @@ function screen(ctx) {
     ] }
   ];
   const playRef = "u|" + url + (referer.trim() ? "	" + referer.trim() : "");
-  const playButton = (es, en) => ({ type: "ElevatedButton", key: "play", labelText: es, labelTextEn: en, onPressed: { go: { play: { ref: playRef, kind: "movie", id: slug(url), title: hostOf3(url) } } } });
+  const playButton = (es, en) => ({ type: "ElevatedButton", key: "play", labelText: es, labelTextEn: en, onPressed: { go: { play: { ref: playRef, kind: "movie", id: slug(url), title: hostOf4(url) } } } });
   if (result && result.ok) {
     const servers = [...new Set((result.embeds || []).map((e) => e.server))].filter(Boolean).join(", ");
     children.push({ type: "Card", key: "ok", children: [
