@@ -711,18 +711,32 @@ function okruManifest(html) {
   }
   return "";
 }
-var okru_default;
+function okruMp4(html) {
+  const un = String(html || "").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\\"/g, '"');
+  const found = {};
+  for (const m of un.matchAll(/"name":"([a-z]+)","url":"(https:[^"]+)"/g)) if (!found[m[1]]) found[m[1]] = m[2];
+  const name = MP4_ORDER.find((n) => found[n]);
+  return name ? found[name].replace(/\\u0026/g, "&").replace(/\\\//g, "/").replace(/\\\\/g, "") : "";
+}
+var AS_ASKED, MP4_ORDER, OKRU_DEAD, okru_default;
 var init_okru = __esm({
   "src/extractors/okru.js"() {
     init_lib();
+    AS_ASKED = [{ name: "User-Agent", value: UA }];
+    MP4_ORDER = ["full", "quad", "hd", "sd", "low", "lowest", "mobile"];
+    OKRU_DEAD = /авторских прав|Видео удалено|видео недоступно/i;
     okru_default = {
       id: "okru",
       match: (url) => /okru\.link|ok\.ru|odnoklassniki/i.test(url),
       async resolve(url) {
         try {
           if (/ok\.ru|odnoklassniki/i.test(url) && !url.includes("okru.link")) {
-            const man = okruManifest(await getText(url, { referer: "https://ok.ru/" }));
-            if (man) return { streams: [{ url: man, kind: /dash/i.test(man) ? "dash" : "hls", server: "okru", referer: "https://ok.ru/" }] };
+            const page = await getText(url, { referer: "https://ok.ru/" });
+            const man = okruManifest(page);
+            if (man) return { streams: [{ url: man, kind: /dash/i.test(man) ? "dash" : "hls", server: "okru", referer: "https://ok.ru/", headers: AS_ASKED }] };
+            const mp4 = okruMp4(page);
+            if (mp4) return { streams: [{ url: mp4, kind: "mp4", server: "okru", referer: "https://ok.ru/", headers: AS_ASKED }] };
+            if (OKRU_DEAD.test(page)) return { streams: [], error: "dead" };
             return { streams: [], error: "needs_browser" };
           }
           if (url.includes("okru.link/v2")) {
