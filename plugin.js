@@ -291,6 +291,17 @@ function b64decode(input) {
   }
   return out;
 }
+function b64encode(input) {
+  const s = String(input);
+  let out = "";
+  for (let i = 0; i < s.length; i += 3) {
+    const a = s.charCodeAt(i) & 255, b = i + 1 < s.length ? s.charCodeAt(i + 1) & 255 : NaN, c = i + 2 < s.length ? s.charCodeAt(i + 2) & 255 : NaN;
+    out += B64[a >> 2] + B64[(a & 3) << 4 | (b || 0) >> 4];
+    out += Number.isNaN(b) ? "=" : B64[(b & 15) << 2 | (c || 0) >> 6];
+    out += Number.isNaN(c) ? "=" : B64[c & 63];
+  }
+  return out;
+}
 async function fetchManual(url, { timeoutMs, headers } = {}) {
   try {
     return await kino.fetch(url, { redirect: "manual", ...headers ? { headers } : {}, ...timeoutMs ? { timeoutMs } : {} });
@@ -416,7 +427,44 @@ function voeDecode(data) {
     return null;
   }
 }
-var RE, JUNK, rot13, voe_default;
+function solveAltcha(parameters, derive, maxTries = 2e4) {
+  const p = parameters || {};
+  const hash = /SHA-512/i.test(p.algorithm || "") ? "sha512" : /SHA-384/i.test(p.algorithm || "") ? null : "sha256";
+  if (!hash || !/^[0-9a-f]+$/i.test(p.nonce || "") || !/^[0-9a-f]+$/i.test(p.salt || "") || typeof p.keyPrefix !== "string") return null;
+  const prefix = p.keyPrefix.toLowerCase();
+  for (let counter = 0; counter < maxTries; counter++) {
+    const key = String(derive(hash, p.nonce + counter.toString(16).padStart(8, "0"), p.salt, p.cost, p.keyLength || 32)).toLowerCase();
+    if (key.startsWith(prefix)) return { counter, derivedKey: key };
+  }
+  return null;
+}
+async function passAltcha(html, pageUrl) {
+  try {
+    const k = globalThis.kino;
+    const token = single(html, 'name="_token" value="([^"]+)"');
+    const action = single(html, '<form method="POST" action="([^"]+)"');
+    const challengeUrl = single(html, 'altcha-widget challenge="([^"]+)"');
+    if (!token || !action || !challengeUrl || !k.crypto || typeof k.crypto.pbkdf2 !== "function") return null;
+    const r = await k.fetch(new URL(challengeUrl, pageUrl).href, { headers: { "User-Agent": UA, Referer: pageUrl, Accept: "application/json" }, timeoutMs: 8e3 });
+    if (!r.ok) return null;
+    const challenge = JSON.parse(await r.text());
+    const t0 = Date.now();
+    const solution = solveAltcha(challenge.parameters, (hash, pw, salt, cost, len) => k.crypto.pbkdf2(hash, pw, salt, cost, len, { keyEncoding: "hex", inputEncoding: "hex", outputEncoding: "hex" }));
+    if (!solution) return null;
+    const body = `_token=${encodeURIComponent(token)}&access=0&altcha=${encodeURIComponent(altchaPayload(challenge, solution, Date.now() - t0))}`;
+    const post = await k.fetch(new URL(action, pageUrl).href, {
+      method: "POST",
+      body,
+      timeoutMs: 1e4,
+      headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", Referer: pageUrl, Origin: new URL(pageUrl).origin }
+    });
+    const page = String(await post.text());
+    return /<script type="application\/json">/.test(page) ? page : null;
+  } catch {
+    return null;
+  }
+}
+var RE, JUNK, rot13, altchaPayload, voe_default;
 var init_voe = __esm({
   "src/extractors/voe.js"() {
     init_lib();
@@ -426,6 +474,7 @@ var init_voe = __esm({
       const b = c <= "Z" ? 65 : 97;
       return String.fromCharCode(b + (c.charCodeAt(0) - b + 13) % 26);
     });
+    altchaPayload = (challenge, solution, took) => b64encode(JSON.stringify({ challenge: { parameters: challenge.parameters, signature: challenge.signature }, solution: { counter: solution.counter, derivedKey: solution.derivedKey, time: took } }));
     voe_default = {
       id: "voe",
       match: (url) => RE.test(url),
@@ -443,15 +492,21 @@ var init_voe = __esm({
             return "https://voe.sx/";
           }
         })();
+        let pageUrl = url;
         if (data.includes("permanentToken") || data.includes("Redirecting")) {
           const r = single(data, "window\\.location\\.href\\s*=\\s*'(https?://[^']+)'");
           if (r) {
             data = await getTextCF(r, { referer: origin });
+            pageUrl = r;
             try {
               origin = new URL(r).origin + "/";
             } catch {
             }
           }
+        }
+        if (/<altcha-widget/i.test(data)) {
+          const passed = await passAltcha(data, pageUrl);
+          if (passed) data = passed;
         }
         const dec = voeDecode(data);
         if (dec) {
