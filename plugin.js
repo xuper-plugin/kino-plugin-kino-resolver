@@ -159,7 +159,7 @@ function parseIuamChallenge(html, url) {
 async function solveIuam(url, html) {
   const ch = parseIuamChallenge(html, url);
   if (!ch) return null;
-  await new Promise((ok) => setTimeout(ok, challengeDelayMs(html)));
+  await kino.sleep(challengeDelayMs(html));
   const checkBase = `${ch.protocol}//${ch.host}/cdn-cgi/l/chk_jschl`;
   const qparams = `jschl_vc=${encodeURIComponent(ch.vc)}&pass=${encodeURIComponent(ch.pass)}&jschl_answer=${encodeURIComponent(ch.answer)}`;
   const attempts = [
