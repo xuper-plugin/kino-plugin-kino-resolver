@@ -73,9 +73,13 @@ var init_jsunpack = __esm({
 function isCfChallenge(html, status, headers) {
   const h = headers || {};
   const cfRay = h["cf-ray"] || h["CF-RAY"];
-  if ((status === 403 || status === 503) && cfRay) return true;
+  if ((status === 403 || status === 503 || status === 429) && cfRay) return true;
   if (!html) return false;
-  return /cf\.chl_opt\b/.test(html) || /<title>Just a moment\.\.\.<\/title>/i.test(html) || /Checking your browser before accessing/i.test(html) || /__cf_chl_jschl_tk__/.test(html) || /challenge-form/.test(html) || /cf-browser-verification/.test(html) || /cdn-cgi\/challenge-platform/.test(html);
+  return /cf\.chl_opt\b/.test(html) || /<title>Just a moment\.\.\.<\/title>/i.test(html) || /Checking your browser before accessing/i.test(html) || /__cf_chl_jschl_tk__/.test(html) || /challenge-form/.test(html) || /cf-browser-verification/.test(html) || /cdn-cgi\/challenge-platform/.test(html) || // Also catches generic "5-second check" pages some hosters put in front
+  /DDoS protection by Cloudflare/i.test(html);
+}
+function isIuamV2(html) {
+  return /name="s"\s+value="/.test(html) || /name="r"\s+value="/.test(html);
 }
 async function tryBrowserPage(url, timeoutMs) {
   const bp = globalThis.kino?.browser?.page;
@@ -95,34 +99,56 @@ function parseIuamChallenge(html, url) {
     const vc = (/name="jschl_vc"\s+value="([^"]+)"/.exec(html) || [])[1];
     const pass = (/name="pass"\s+value="([^"]+)"/.exec(html) || [])[1];
     if (!vc || !pass) return null;
-    const scriptMatch = /setTimeout\(function\(\)\s*\{([\s\S]+?)}, [0-9]+\);/.exec(html);
+    const scriptMatch = /setTimeout\s*\(\s*function\s*\(\s*\)\s*\{([\s\S]+?)},\s*[0-9]+\s*\);/.exec(html);
     if (!scriptMatch) return null;
     const exprMatch = /a\.value\s*=\s*([\s\S]+?);/.exec(scriptMatch[1]);
     if (!exprMatch) return null;
     const val = new Function(`return ${exprMatch[1].trim()};`)();
     if (typeof val !== "number" || !isFinite(val)) return null;
-    return { vc, pass, answer: (val + u.hostname.length).toFixed(10).replace(/\.?0+$/, "") };
+    const answer = (val + u.hostname.length).toFixed(10).replace(/\.?0+$/, "");
+    return { vc, pass, answer, host: u.host, protocol: u.protocol };
   } catch {
     return null;
   }
 }
 async function solveIuam(url, html) {
+  if (isIuamV2(html)) return null;
   const ch = parseIuamChallenge(html, url);
   if (!ch) return null;
   await new Promise((ok) => setTimeout(ok, 4100));
-  const u = new URL(url);
-  const authUrl = `${u.protocol}//${u.host}/cdn-cgi/l/chk_jschl?jschl_vc=${encodeURIComponent(ch.vc)}&pass=${encodeURIComponent(ch.pass)}&jschl_answer=${encodeURIComponent(ch.answer)}`;
-  try {
-    await kino.fetch(authUrl, { headers: { "User-Agent": UA, Referer: url }, redirect: "follow" });
-    const r2 = await kino.fetch(url, { headers: { "User-Agent": UA } });
-    const html2 = typeof r2.text === "function" ? await r2.text() : "";
-    if (html2 && !isCfChallenge(html2, r2.status, r2.headers)) return html2;
-  } catch {
+  const checkBase = `${ch.protocol}//${ch.host}/cdn-cgi/l/chk_jschl`;
+  const qparams = `jschl_vc=${encodeURIComponent(ch.vc)}&pass=${encodeURIComponent(ch.pass)}&jschl_answer=${encodeURIComponent(ch.answer)}`;
+  const attempts = [
+    // GET: params in query string
+    () => kino.fetch(`${checkBase}?${qparams}`, {
+      headers: { ...IUAM_AUTH_HEADERS, "Referer": url },
+      redirect: "follow"
+    }),
+    // POST: params in body, URL only has the base path
+    () => kino.fetch(checkBase, {
+      method: "POST",
+      headers: { ...IUAM_AUTH_HEADERS, "Referer": url },
+      body: { form: { jschl_vc: ch.vc, pass: ch.pass, jschl_answer: ch.answer } },
+      redirect: "follow"
+    })
+  ];
+  for (const attempt of attempts) {
+    try {
+      await attempt();
+      const r2 = await kino.fetch(url, { headers: BROWSER_HEADERS });
+      const html2 = typeof r2.text === "function" ? await r2.text() : "";
+      if (html2 && !isCfChallenge(html2, r2.status, r2.headers)) return html2;
+    } catch {
+    }
   }
   return null;
 }
 async function getTextCF(url, { referer, headers, timeoutMs } = {}) {
-  const h = { "User-Agent": UA, ...referer ? { Referer: referer } : {}, ...headers || {} };
+  const h = {
+    ...BROWSER_HEADERS,
+    ...referer ? { "Referer": referer, "Sec-Fetch-Site": "cross-site" } : {},
+    ...headers || {}
+  };
   const r = await kino.fetch(url, { headers: h, ...timeoutMs ? { timeoutMs } : {} });
   const html = typeof r.text === "function" ? await r.text() : "";
   if (!isCfChallenge(html, r.status, r.headers)) return html;
@@ -132,10 +158,31 @@ async function getTextCF(url, { referer, headers, timeoutMs } = {}) {
   if (fromIuam) return fromIuam;
   return html;
 }
-var UA;
+var UA, BROWSER_HEADERS, IUAM_AUTH_HEADERS;
 var init_cloudflare = __esm({
   "src/cloudflare.js"() {
     UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+    BROWSER_HEADERS = {
+      "User-Agent": UA,
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Accept-Encoding": "gzip, deflate",
+      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1"
+    };
+    IUAM_AUTH_HEADERS = {
+      "User-Agent": UA,
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Accept-Encoding": "gzip, deflate",
+      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "same-origin"
+    };
   }
 });
 
