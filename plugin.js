@@ -69,6 +69,76 @@ var init_jsunpack = __esm({
   }
 });
 
+// src/cloudflare.js
+function isCfChallenge(html, status, headers) {
+  const h = headers || {};
+  const cfRay = h["cf-ray"] || h["CF-RAY"];
+  if ((status === 403 || status === 503) && cfRay) return true;
+  if (!html) return false;
+  return /cf\.chl_opt\b/.test(html) || /<title>Just a moment\.\.\.<\/title>/i.test(html) || /Checking your browser before accessing/i.test(html) || /__cf_chl_jschl_tk__/.test(html) || /challenge-form/.test(html) || /cf-browser-verification/.test(html) || /cdn-cgi\/challenge-platform/.test(html);
+}
+async function tryBrowserPage(url, timeoutMs) {
+  const bp = globalThis.kino?.browser?.page;
+  if (typeof bp !== "function") return null;
+  try {
+    const r = await bp(url, { timeoutMs: Math.min(timeoutMs || 2e4, 2e4) });
+    const html = r?.html ?? null;
+    if (html && !isCfChallenge(html, 200, {})) return html;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function parseIuamChallenge(html, url) {
+  try {
+    const u = new URL(url);
+    const vc = (/name="jschl_vc"\s+value="([^"]+)"/.exec(html) || [])[1];
+    const pass = (/name="pass"\s+value="([^"]+)"/.exec(html) || [])[1];
+    if (!vc || !pass) return null;
+    const scriptMatch = /setTimeout\(function\(\)\s*\{([\s\S]+?)}, [0-9]+\);/.exec(html);
+    if (!scriptMatch) return null;
+    const exprMatch = /a\.value\s*=\s*([\s\S]+?);/.exec(scriptMatch[1]);
+    if (!exprMatch) return null;
+    const val = new Function(`return ${exprMatch[1].trim()};`)();
+    if (typeof val !== "number" || !isFinite(val)) return null;
+    return { vc, pass, answer: (val + u.hostname.length).toFixed(10).replace(/\.?0+$/, "") };
+  } catch {
+    return null;
+  }
+}
+async function solveIuam(url, html) {
+  const ch = parseIuamChallenge(html, url);
+  if (!ch) return null;
+  await new Promise((ok) => setTimeout(ok, 4100));
+  const u = new URL(url);
+  const authUrl = `${u.protocol}//${u.host}/cdn-cgi/l/chk_jschl?jschl_vc=${encodeURIComponent(ch.vc)}&pass=${encodeURIComponent(ch.pass)}&jschl_answer=${encodeURIComponent(ch.answer)}`;
+  try {
+    await kino.fetch(authUrl, { headers: { "User-Agent": UA, Referer: url }, redirect: "follow" });
+    const r2 = await kino.fetch(url, { headers: { "User-Agent": UA } });
+    const html2 = typeof r2.text === "function" ? await r2.text() : "";
+    if (html2 && !isCfChallenge(html2, r2.status, r2.headers)) return html2;
+  } catch {
+  }
+  return null;
+}
+async function getTextCF(url, { referer, headers, timeoutMs } = {}) {
+  const h = { "User-Agent": UA, ...referer ? { Referer: referer } : {}, ...headers || {} };
+  const r = await kino.fetch(url, { headers: h, ...timeoutMs ? { timeoutMs } : {} });
+  const html = typeof r.text === "function" ? await r.text() : "";
+  if (!isCfChallenge(html, r.status, r.headers)) return html;
+  const fromPage = await tryBrowserPage(url, timeoutMs);
+  if (fromPage) return fromPage;
+  const fromIuam = await solveIuam(url, html);
+  if (fromIuam) return fromIuam;
+  return html;
+}
+var UA;
+var init_cloudflare = __esm({
+  "src/cloudflare.js"() {
+    UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+  }
+});
+
 // src/lib.js
 function pyPattern(patron) {
   let p = String(patron);
@@ -107,11 +177,6 @@ function b64decode(input) {
     if (e4 >= 0) out += String.fromCharCode((e3 & 3) << 6 | e4);
   }
   return out;
-}
-async function getText(url, { referer, headers, timeoutMs } = {}) {
-  const h = { "User-Agent": UA, ...referer ? { Referer: referer } : {}, ...headers || {} };
-  const r = await kino.fetch(url, { headers: h, ...timeoutMs ? { timeoutMs } : {} });
-  return typeof r.text === "function" ? await r.text() : "";
 }
 async function fetchManual(url, { timeoutMs, headers } = {}) {
   try {
@@ -185,10 +250,11 @@ async function browserCapture(url, { referer, match, timeoutMs } = {}) {
   }
   return out;
 }
-var single, multi, B64, UA, streamKind, LANG_CODES, toHeaders;
+var single, multi, B64, streamKind, LANG_CODES, toHeaders;
 var init_lib = __esm({
   "src/lib.js"() {
     init_jsunpack();
+    init_cloudflare();
     single = (data, patron, i = 0) => {
       try {
         const v = findall(patron, data)[i];
@@ -205,7 +271,6 @@ var init_lib = __esm({
       }
     };
     B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
     streamKind = (u) => /\.m3u8(\?|$)/i.test(u) ? "hls" : /\.mpd(\?|$)/i.test(u) ? "dash" : "mp4";
     LANG_CODES = [
       [/^(español|espanol|spanish|castellano|latino|spa|esp?)\b/i, "es"],
@@ -254,11 +319,11 @@ var init_voe = __esm({
         return id ? "https://voe.sx/e/" + id : url;
       },
       async resolve(url) {
-        let data = await getText(url);
+        let data = await getTextCF(url);
         if (/File not found|File is no longer available|Error 404|404 - No encontrado/i.test(data)) return { streams: [], error: "dead" };
         if (data.includes("permanentToken") || data.includes("Redirecting")) {
           const r = single(data, "window\\.location\\.href\\s*=\\s*'(https?://[^']+)'");
-          if (r) data = await getText(r, { referer: "https://voe.sx/" });
+          if (r) data = await getTextCF(r, { referer: "https://voe.sx/" });
         }
         const dec = voeDecode(data);
         if (dec) {
@@ -324,7 +389,7 @@ async function tryPage(url) {
     if (!r) return null;
     const loc = locationOf(r);
     if (loc) pageUrl = loc;
-    const data = !loc && r.status === 200 && typeof r.text === "function" ? String(await r.text()) : await getText(pageUrl, { timeoutMs: PAGE_MS });
+    const data = !loc && r.status === 200 && typeof r.text === "function" ? String(await r.text()) : await getTextCF(pageUrl, { timeoutMs: PAGE_MS });
     if (GATE.test(data)) return null;
     if (DEAD.test(data) && !/p,a,c,k,e,d/.test(data)) return "dead";
     const pack = single(data, "p,a,c,k,e,d.*?<\/script>");
@@ -371,7 +436,7 @@ var init_streamwish = __esm({
 
 // src/extractors/streamtape.js
 async function aux(pageUrl) {
-  const data = await getText(pageUrl, { referer: pageUrl });
+  const data = await getTextCF(pageUrl, { referer: pageUrl });
   if (data.includes("Video not found")) return { dead: true, streams: [] };
   const token = single(data, TOKEN);
   if (!token) return { streams: [] };
@@ -420,7 +485,7 @@ var init_mp4upload = __esm({
         return p;
       },
       async resolve(url) {
-        let data = await getText(url);
+        let data = await getTextCF(url);
         data = data.replace(/\n|\r|\t|\s{2}|&nbsp;/g, "");
         if (data === "File was deleted" || data === "") return { streams: [], error: "dead" };
         const m = single(data, "<script type='text/javascript'>(.*?)<\/script>");
@@ -450,7 +515,7 @@ var init_vidoza = __esm({
       match: (url) => /vidoza|videzz/i.test(url),
       async resolve(url) {
         const p = url.replace(/%7B/g, "").replace(/%7D/g, "");
-        const data = await getText(p);
+        const data = await getTextCF(p);
         if (/Page not found|File was deleted/i.test(data)) return { streams: [], error: "dead" };
         if (/processing|Video encoding error/i.test(data)) return { streams: [], error: "upstream_error" };
         let s = single(data, "sourcesCode\\s*:\\s*(\\[\\{.*?\\}\\])");
@@ -486,7 +551,7 @@ var init_uqload = __esm({
         return p.replace(".html/.html", ".html");
       },
       async resolve(url) {
-        const data = await getText(url, { headers: { Referer: HOST, Origin: HOST } });
+        const data = await getTextCF(url, { headers: { Referer: HOST, Origin: HOST } });
         if (/File was deleted|no longer available|The file expired|The file was deleted/i.test(data)) return { streams: [], error: "dead" };
         let bloque = single(data, "sources\\s*:\\s*\\[(.*?)\\]");
         if (!bloque) {
@@ -527,7 +592,7 @@ var init_vidmoly = __esm({
       async resolve(url, { referer } = {}) {
         const host = (/https?:\/\/([^/]+)/i.exec(url) || [, "vidmoly.net"])[1];
         const code = (/\/embed-([A-Za-z0-9]+)/i.exec(url) || [, ""])[1];
-        const data = await getText(url, { referer, headers: { cookie: "cf_turnstile_demo_pass_" + code + "=1" } });
+        const data = await getTextCF(url, { referer, headers: { cookie: "cf_turnstile_demo_pass_" + code + "=1" } });
         if (/\/notice\.php|This video (not found|was deleted|is no longer)/i.test(data)) return { streams: [], error: "dead" };
         if (data.includes(">Security Check<")) return { streams: [], error: "needs_browser" };
         let u = single(data, "sources:.*?file:.*?'(.*?)'.*?,") || single(data, 'sources:.*?file:.*?"(.*?)".*?,');
@@ -561,7 +626,7 @@ var init_streamvid = __esm({
       id: "streamvid",
       match: (url) => /streamvid|vidstreamz/i.test(url),
       async resolve(url) {
-        const data = await getText(url);
+        const data = await getTextCF(url);
         if (/Not Found/i.test(data)) return { streams: [], error: "dead" };
         const packed = single(data, `<script type=["']text/javascript["']>\\s*;?(eval.*?)<\/script>`);
         try {
@@ -588,7 +653,7 @@ var init_fastream = __esm({
       async resolve(url) {
         let page = url, referer;
         if (url.includes("|")) [page, referer] = url.split("|");
-        const data = await getText(page, { referer });
+        const data = await getTextCF(page, { referer });
         if (/File is no longer available as it expired or has been deleted/i.test(data)) return { streams: [], error: "dead" };
         let block = "", unpacked = "";
         try {
@@ -618,7 +683,7 @@ var init_streamhide = __esm({
         return url.replace(/\/\/(?:playhide\.online|streamhide\.com|guccihide\.com|moviesm4u\.com|louishide\.com|ahvsh\.com|movhide\.pro)\//, "//streamhide.to/");
       },
       async resolve(url) {
-        const data = await getText(url);
+        const data = await getTextCF(url);
         if (/Not Found|File was deleted|is no longer available/i.test(data)) return { streams: [], error: "dead" };
         let u = single(data, 'sources: \\[{file:"([^"]+)"');
         if (!u) {
@@ -644,7 +709,7 @@ var init_streamlare = __esm({
       id: "streamlare",
       match: (url) => /streamlare|slmaxed|slwatch|sltube|streamlure/i.test(url),
       async resolve(url) {
-        const data = await getText(url);
+        const data = await getTextCF(url);
         if (/Not Found|File was deleted|is no longer available/i.test(data)) return { streams: [], error: "dead" };
         const id = single(url, "/e/(\\w+)") || single(url, "/v/(\\w+)");
         if (!id) return { streams: [], error: "no_streams" };
@@ -677,7 +742,7 @@ var init_supervideo = __esm({
         return p;
       },
       async resolve(url) {
-        const raw = await getText(url);
+        const raw = await getTextCF(url);
         if (/<title>404 Not Found<\/title>|File is no longer available|File Not Found/i.test(raw)) return { streams: [], error: "dead" };
         let data = "";
         for (const pack of multi(raw, "(?s)eval(.*?)\\s*<\/script>")) {
@@ -731,7 +796,7 @@ var init_okru = __esm({
       async resolve(url) {
         try {
           if (/ok\.ru|odnoklassniki/i.test(url) && !url.includes("okru.link")) {
-            const page = await getText(url, { referer: "https://ok.ru/" });
+            const page = await getTextCF(url, { referer: "https://ok.ru/" });
             const man = okruManifest(page);
             if (man) return { streams: [{ url: man, kind: /dash/i.test(man) ? "dash" : "hls", server: "okru", referer: "https://ok.ru/", headers: AS_ASKED }] };
             const mp4 = okruMp4(page);
@@ -752,7 +817,7 @@ var init_okru = __esm({
             if (video) return { streams: [{ url: video.replace(/\\\//g, "/"), kind: "mp4", server: "okru" }] };
           } else if (url.includes("okru.link")) {
             const v = single(url, "t=(\\w+)");
-            const data = await getText("https://okru.link/details.php?v=" + v);
+            const data = await getTextCF("https://okru.link/details.php?v=" + v);
             if (/Por causas ajenas a|\{"status":"decoding"\}/.test(data)) return { streams: [], error: "geo_blocked" };
             let video = single(data, '"file":"(.*?)"');
             if (video) return { streams: [{ url: video.replace(/\\\//g, "/"), kind: "mp4", server: "okru" }] };
@@ -777,7 +842,7 @@ var init_zures = __esm({
       normalize: (url) => url,
       async resolve(url) {
         const host = single(url, "https?://([^/]+)") || "vimeos.net";
-        const data = await getText(url, { referer: "https://" + host + "/" });
+        const data = await getTextCF(url, { referer: "https://" + host + "/" });
         if (/File not found|not found|deleted|no longer available/i.test(data)) return { streams: [], error: "dead" };
         const start = data.indexOf("eval(function(p,a,c,k,e,d)");
         if (start < 0) return { streams: [], error: "needs_browser" };
@@ -812,7 +877,7 @@ var init_goodstream = __esm({
       async resolve(url) {
         let page = url, referer;
         if (url.includes("|")) [page, referer] = url.split("|");
-        const data = await getText(page, { referer: referer || "https://goodstream.one/" });
+        const data = await getTextCF(page, { referer: referer || "https://goodstream.one/", timeoutMs: 6e3 });
         if (/File (is )?(no longer available|not found|was deleted|has been deleted)|Error 404|404 - No encontrado/i.test(data)) return { streams: [], error: "dead" };
         let unpacked = "";
         try {
@@ -849,7 +914,7 @@ var init_nupload = __esm({
         } catch {
           return { streams: [], error: "bad_request" };
         }
-        const html = await getText(page, { referer: referer || origin + "/" });
+        const html = await getTextCF(page, { referer: referer || origin + "/" });
         const arr = /([A-Za-z]+)\.forEach\s*\(function\s+\w+\s*\(value\)\s*\{[^}]+atob/.exec(html);
         if (!arr) return { streams: [], error: "needs_browser" };
         const name = arr[1];
@@ -889,11 +954,11 @@ var init_mixdrop = __esm({
       match: (url) => RE7.test(url),
       normalize: (url) => url.replace("/f/", "/e/"),
       async resolve(url) {
-        let data = await getText(url);
+        let data = await getTextCF(url);
         const loc = single(data, 'window\\.location\\s*=\\s*"([^"]+)"');
         if (loc) {
           try {
-            data = await getText(new URL(loc, url).href);
+            data = await getTextCF(new URL(loc, url).href);
           } catch {
           }
         }
@@ -930,7 +995,7 @@ var init_wolfstream = __esm({
       id: "wolfstream",
       match: (url) => RE8.test(url),
       async resolve(url) {
-        const data = await getText(url);
+        const data = await getTextCF(url);
         if (/File (was deleted|not found|is no longer)|404 Not Found/i.test(data)) return { streams: [], error: "dead" };
         let m3u8 = single(data, '\\{file:"([^"]+)"\\}') || single(data, 'file:"([^"]+\\.m3u8[^"]*)"');
         if (!m3u8) {
@@ -956,7 +1021,7 @@ var init_lulustream = __esm({
       id: "lulustream",
       match: (url) => RE9.test(url),
       async resolve(url) {
-        const data = await getText(url);
+        const data = await getTextCF(url);
         if (/Not Found|File was deleted|is no longer available|File not found/i.test(data)) return { streams: [], error: "dead" };
         let m3u8 = "";
         try {
@@ -989,7 +1054,7 @@ var init_gamovideo = __esm({
       id: "gamovideo",
       match: (url) => RE10.test(url),
       async resolve(url) {
-        const data = await getText(url, { referer: "https://gamovideo.com/" });
+        const data = await getTextCF(url, { referer: "https://gamovideo.com/" });
         let file = "";
         try {
           file = single(String(unpack(data) || ""), 'file:\\s*"([^"]+)"');
@@ -1065,12 +1130,12 @@ var init_doodstream = __esm({
         } catch {
           return { streams: [], error: "bad_request" };
         }
-        const page = await getText(url, { referer: origin + "/" });
+        const page = await getTextCF(url, { referer: origin + "/" });
         if (!page) return { streams: [], error: "needs_browser" };
         if (/Video not found|not found|deleted|removed/i.test(page) && !/pass_md5/.test(page)) return { streams: [], error: "dead" };
         const path = (/\/pass_md5\/[\w\-/]+/.exec(page) || [])[0];
         if (!path) return { streams: [], error: "needs_browser" };
-        const base = (await getText(origin + path, { referer: url })).trim();
+        const base = (await getTextCF(origin + path, { referer: url })).trim();
         if (!/^https?:\/\//.test(base)) return { streams: [], error: "needs_browser" };
         const finalUrl = base + rand10();
         return { streams: [{ url: finalUrl, kind: "mp4", server: "doodstream", referer: origin + "/", headers: { Referer: origin + "/" } }] };
@@ -1101,7 +1166,7 @@ var init_hexload = __esm({
         } catch {
           return { streams: [], error: "bad_input" };
         }
-        const html = await getText(u.href, { referer: u.origin + "/" });
+        const html = await getTextCF(u.href, { referer: u.origin + "/" });
         if (!html) return { streams: [], error: "no_streams" };
         const form = formOf(html);
         if (!form) return { streams: [], error: "no_streams" };
@@ -1293,14 +1358,32 @@ function dropToken() {
   } catch {
   }
 }
+function powTooSlowHere() {
+  try {
+    const at = Number(kino.storage.get(SLOW_KEY) || 0);
+    return at > 0 && Date.now() - at < SLOW_MS;
+  } catch {
+    return false;
+  }
+}
+function markPowTooSlow() {
+  try {
+    kino.storage.set(SLOW_KEY, String(Date.now()));
+  } catch {
+  }
+}
 async function obtainToken(base, id, pageUrl, deadline) {
   const cached = cachedToken();
   if (cached) return cached;
+  if (powTooSlowHere()) return null;
   const headers = { Referer: pageUrl, Origin: base };
   const cap = (await postJson(`${base}/api/videos/${id}/embed/captcha`, {}, headers)).json;
   if (!cap || !cap.pow_nonce) return null;
   const sol = solvePow(cap.pow_nonce, Number(cap.pow_difficulty) || 0, deadline);
-  if (sol == null) return null;
+  if (sol == null) {
+    markPowTooSlow();
+    return null;
+  }
   const vr = (await postJson(`${base}/api/videos/${id}/embed/captcha/verify`, { pow_token: cap.pow_token, solution: sol }, headers)).json;
   if (!vr || vr.status !== "ok" || !vr.token) return null;
   saveToken(vr.token, vr.expires_in);
@@ -1312,7 +1395,7 @@ async function fetchPlayback(base, id, pageUrl, token) {
   if (r.status === 428) return { expired: true };
   return { pb: r.json && r.json.playback };
 }
-var RE11, UA2, POW_BUDGET_MS, TOKEN_KEY, hostOf2, originOf, videoId, BE, LT, LR, HR, leadingZeros, b64urlToBin, filemoon_default;
+var RE11, UA2, POW_BUDGET_MS, TOKEN_KEY, hostOf2, originOf, videoId, BE, LT, LR, HR, leadingZeros, b64urlToBin, SLOW_KEY, SLOW_MS, filemoon_default;
 var init_filemoon = __esm({
   "src/extractors/filemoon.js"() {
     init_lib();
@@ -1352,6 +1435,8 @@ var init_filemoon = __esm({
       return n;
     };
     b64urlToBin = (s) => b64decode(String(s || "").replace(/-/g, "+").replace(/_/g, "/"));
+    SLOW_KEY = "filemoonPowSlow1";
+    SLOW_MS = 30 * 60 * 1e3;
     filemoon_default = {
       id: "filemoon",
       match: (url) => RE11.test(hostOf2(url)),
@@ -1360,6 +1445,11 @@ var init_filemoon = __esm({
         if (!base || !id) return { streams: [], error: "bad_request" };
         if (!(globalThis.kino && kino.crypto && typeof kino.crypto.decrypt === "function")) return { streams: [], error: "needs_browser" };
         const pageUrl = `${base}/e/${id}`;
+        try {
+          const st = await kino.fetch(`${base}/api/videos/${id}/embed/settings`, { headers: { "User-Agent": UA2, Referer: pageUrl }, timeoutMs: 6e3 });
+          if (st.status === 404 && /video not found|record missing/i.test(typeof st.text === "function" ? String(await st.text()) : "")) return { streams: [], error: "dead" };
+        } catch {
+        }
         const deadline = Date.now() + POW_BUDGET_MS;
         let token = await obtainToken(base, id, pageUrl, deadline);
         if (!token) return { streams: [], error: "needs_browser" };
@@ -1410,7 +1500,7 @@ var init_savefiles = __esm({
           origin = "https://savefiles.com";
         }
         const embed = `${origin}/dl?op=embed&file_code=${code}&auto=0&referer=`;
-        const data = await getText(embed, { referer: referer || origin + "/" });
+        const data = await getTextCF(embed, { referer: referer || origin + "/" });
         if (/Not Found|File was deleted|is no longer available|File you are looking for is not found/i.test(data)) {
           return { streams: [], error: "dead" };
         }
@@ -1455,7 +1545,7 @@ var init_rpmvid = __esm({
         if (!id) return { streams: [], error: "needs_browser" };
         let j = null;
         try {
-          j = JSON.parse(await getText(`${ORIGIN}/api/public/resolve?file1=${encodeURIComponent(id)}`, { referer: ORIGIN + "/" }));
+          j = JSON.parse(await getTextCF(`${ORIGIN}/api/public/resolve?file1=${encodeURIComponent(id)}`, { referer: ORIGIN + "/" }));
         } catch {
           j = null;
         }
@@ -1491,7 +1581,7 @@ var init_sendvid = __esm({
       match: (url) => RE14.test(url),
       normalize: (url) => String(url || "").replace(/sendvid\.com\/(?!embed\/)([A-Za-z0-9]+)/i, "sendvid.com/embed/$1"),
       async resolve(url, { referer } = {}) {
-        const html = await getText(url, { referer: referer || "https://sendvid.com/" });
+        const html = await getTextCF(url, { referer: referer || "https://sendvid.com/" });
         const file = fileOf(html);
         if (!file) return { streams: [], error: /not found|removed|deleted|no longer/i.test(html) || !/video/i.test(html) ? "dead" : "needs_browser" };
         return { streams: [{ url: file, kind: "mp4", server: "sendvid", referer: "https://sendvid.com/" }] };
@@ -1675,7 +1765,7 @@ async function findEmbeds(input) {
   if (direct) return [{ url, server: direct.id }];
   let html = "";
   try {
-    html = await getText(url, { referer: url });
+    html = await getTextCF(url, { referer: url });
   } catch {
     return [];
   }

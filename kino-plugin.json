@@ -1,7 +1,7 @@
 {
   "id": "kino-resolver",
   "name": "Kino Resolver",
-  "version": "0.0.25",
+  "version": "0.0.27",
   "apiVersion": 20,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -10,7 +10,7 @@
   "homepage": "https://github.com/xuper-plugin/kino-plugin-kino-resolver",
   "hosts": [],
   "fetchHosts": "any",
-  "browser": true,
+  "browser": "pages",
   "capabilities": [
     "resolve",
     "search",
