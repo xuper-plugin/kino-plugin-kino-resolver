@@ -812,7 +812,7 @@ var init_goodstream = __esm({
       async resolve(url) {
         let page = url, referer;
         if (url.includes("|")) [page, referer] = url.split("|");
-        const data = await getText(page, { referer: referer || "https://goodstream.one/" });
+        const data = await getText(page, { referer: referer || "https://goodstream.one/", timeoutMs: 6e3 });
         if (/File (is )?(no longer available|not found|was deleted|has been deleted)|Error 404|404 - No encontrado/i.test(data)) return { streams: [], error: "dead" };
         let unpacked = "";
         try {
@@ -1360,6 +1360,11 @@ var init_filemoon = __esm({
         if (!base || !id) return { streams: [], error: "bad_request" };
         if (!(globalThis.kino && kino.crypto && typeof kino.crypto.decrypt === "function")) return { streams: [], error: "needs_browser" };
         const pageUrl = `${base}/e/${id}`;
+        try {
+          const st = await kino.fetch(`${base}/api/videos/${id}/embed/settings`, { headers: { "User-Agent": UA2, Referer: pageUrl }, timeoutMs: 6e3 });
+          if (st.status === 404 && /video not found|record missing/i.test(typeof st.text === "function" ? String(await st.text()) : "")) return { streams: [], error: "dead" };
+        } catch {
+        }
         const deadline = Date.now() + POW_BUDGET_MS;
         let token = await obtainToken(base, id, pageUrl, deadline);
         if (!token) return { streams: [], error: "needs_browser" };
