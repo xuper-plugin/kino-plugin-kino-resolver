@@ -1795,6 +1795,66 @@ var init_turboembed = __esm({
   }
 });
 
+// src/extractors/vidguard.js
+function decodeSig(url) {
+  const sig = (/sig=([^&]+)/.exec(String(url)) || [])[1];
+  if (!sig) return url;
+  try {
+    const chunks = sig.match(/.{1,2}/g) || [];
+    let b64 = "";
+    for (const c of chunks) {
+      const n = parseInt(c, 16);
+      if (Number.isNaN(n)) return url;
+      b64 += String.fromCharCode((n ^ 2) & 255);
+    }
+    const pad = b64.length % 4;
+    const padded = pad === 2 ? b64 + "==" : pad === 3 ? b64 + "=" : b64;
+    const decoded = b64decode(padded);
+    const arr = decoded.slice(0, -5).split("").reverse();
+    for (let i = 0; i + 1 < arr.length; i += 2) {
+      const t = arr[i];
+      arr[i] = arr[i + 1];
+      arr[i + 1] = t;
+    }
+    const finalData = arr.join("").slice(0, -5);
+    if (!finalData) return url;
+    return url.replace(sig, () => finalData);
+  } catch {
+    return url;
+  }
+}
+var RE16, DEAD2, vidguard_default;
+var init_vidguard = __esm({
+  "src/extractors/vidguard.js"() {
+    init_lib();
+    RE16 = /(?:^|\/\/|\.)(?:vidguard|listeamed|vembed)\./i;
+    DEAD2 = /not found|no longer available|file (?:was )?(?:deleted|removed)|video is unavailable/i;
+    vidguard_default = {
+      id: "vidguard",
+      match: (url) => RE16.test(url),
+      async resolve(url) {
+        const html = await getTextCF(url, { referer: url });
+        if (DEAD2.test(html) && !/p,a,c,k,e,d/.test(html)) return { streams: [], error: "dead" };
+        let body = html;
+        const packed = single(html, "p,a,c,k,e,d[\\s\\S]*?<\/script>");
+        if (packed) {
+          try {
+            const u = unpack(packed);
+            if (u) body = String(u);
+          } catch {
+          }
+        }
+        let stream = single(body, '"stream"\\s*:\\s*"([^"]+)"') || single(html, '"stream"\\s*:\\s*"([^"]+)"');
+        if (!stream) return { streams: [], error: "needs_browser" };
+        stream = stream.replace(/\\\//g, "/");
+        const playlist = decodeSig(stream);
+        if (!/^https?:\/\//.test(playlist)) return { streams: [], error: "needs_browser" };
+        return { streams: [{ url: playlist, kind: streamKind(playlist), server: "vidguard", referer: url }] };
+      }
+    };
+  }
+});
+
 // src/registry.js
 var registry_exports = {};
 __export(registry_exports, {
@@ -1840,7 +1900,8 @@ var init_registry = __esm({
     init_rpmvid();
     init_sendvid();
     init_turboembed();
-    EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default, savefiles_default, rpmvid_default, sendvid_default, turboembed_default];
+    init_vidguard();
+    EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default, savefiles_default, rpmvid_default, sendvid_default, turboembed_default, vidguard_default];
   }
 });
 
