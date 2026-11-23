@@ -750,8 +750,15 @@ var init_uqload = __esm({
         if (!p.endsWith(".html")) p += ".html";
         return p.replace(".html/.html", ".html");
       },
-      async resolve(url) {
-        const data = await getTextCF(url, { headers: { Referer: HOST, Origin: HOST } });
+      async resolve(url, { referer } = {}) {
+        const data = await getTextCF(url, referer && !/uqload/i.test(referer) ? { headers: { Referer: referer } } : {});
+        const pageOrigin = (() => {
+          try {
+            return new URL(url).origin + "/";
+          } catch {
+            return HOST;
+          }
+        })();
         if (/File was deleted|no longer available|The file expired|The file was deleted/i.test(data)) return { streams: [], error: "dead" };
         let bloque = single(data, "sources\\s*:\\s*\\[(.*?)\\]");
         if (!bloque) {
@@ -767,7 +774,7 @@ var init_uqload = __esm({
         }
         const streams = [];
         for (const u of multi(bloque, '(http.*?)"')) {
-          streams.push({ url: u, kind: /\.m3u8|\.m3u(\?|$)/i.test(u) ? "hls" : "mp4", server: "uqload", referer: HOST, headers: toHeaders({ Referer: HOST, Origin: HOST }) });
+          streams.push({ url: u, kind: /\.m3u8|\.m3u(\?|$)/i.test(u) ? "hls" : "mp4", server: "uqload", referer: pageOrigin, headers: toHeaders({ Referer: pageOrigin }) });
         }
         return streams.length ? { streams } : { streams: [], error: "needs_browser" };
       }
@@ -989,7 +996,7 @@ var init_okru = __esm({
     init_lib();
     AS_ASKED = [{ name: "User-Agent", value: UA }];
     MP4_ORDER = ["full", "quad", "hd", "sd", "low", "lowest", "mobile"];
-    OKRU_DEAD = /авторских прав|Видео удалено|видео недоступно/i;
+    OKRU_DEAD = /авторских прав|Видео удалено|видео недоступно|copyrightsRestricted|yandexError\('(?:notFound|deleted|blocked)/i;
     okru_default = {
       id: "okru",
       match: (url) => /okru\.link|ok\.ru|odnoklassniki/i.test(url),
@@ -1212,33 +1219,66 @@ var init_wolfstream = __esm({
 });
 
 // src/extractors/lulustream.js
-var RE9, lulustream_default;
+function candidates2(url) {
+  let own = "";
+  let id = "";
+  try {
+    const u = new URL(url);
+    own = u.hostname.replace(/^www\./, "");
+    id = u.pathname.split("/").filter(Boolean).pop() || "";
+  } catch {
+    return [url];
+  }
+  id = id.replace(/\.html?$/i, "");
+  return [url, ...id ? LIVE.filter((h) => h !== own).map((h) => `https://${h}/e/${id}`) : []];
+}
+async function tryPage2(url) {
+  let data = "";
+  try {
+    data = String(await getTextCF(url, { timeoutMs: PAGE_MS2 }));
+  } catch {
+    return null;
+  }
+  if (!data) return null;
+  if (/Not Found|File was deleted|is no longer available|File not found/i.test(data) && !/p,a,c,k,e,d/.test(data)) return "dead";
+  let m3u8 = "";
+  try {
+    const packs = multi(data, `text/javascript(?:'|")>(eval.*?)<\/script>`);
+    const dec = String(unpack(packs[packs.length - 1]) || "");
+    m3u8 = single(dec, 'sources:\\s*\\[\\{(?:file|src):"([^"]+)"');
+  } catch {
+  }
+  if (!m3u8) m3u8 = single(data, 'sources:\\s*\\[\\{(?:file|src):"([^"]+)"');
+  if (!m3u8) return null;
+  let host;
+  try {
+    host = new URL(url).origin;
+  } catch {
+    host = url.replace(/\/[^/]*$/, "");
+  }
+  return { streams: [{ url: m3u8, kind: streamKind(m3u8), server: "lulustream", referer: host + "/", headers: { Origin: host } }] };
+}
+var RE9, LIVE, PAGE_MS2, lulustream_default;
 var init_lulustream = __esm({
   "src/extractors/lulustream.js"() {
     init_lib();
     RE9 = /(?:luluvdo{1,2}|lulustream|luluvid[eo]?s?|lulucdn|hrnyvid|xxvideoss|lulu0?)\.[a-z]{2,}/i;
+    LIVE = ["luluvido.com", "lulustream.com", "cdn1.site"];
+    PAGE_MS2 = 8e3;
     lulustream_default = {
       id: "lulustream",
       match: (url) => RE9.test(url),
       async resolve(url) {
-        const data = await getTextCF(url);
-        if (/Not Found|File was deleted|is no longer available|File not found/i.test(data)) return { streams: [], error: "dead" };
-        let m3u8 = "";
-        try {
-          const packs = multi(data, `text/javascript(?:'|")>(eval.*?)<\/script>`);
-          const dec = String(unpack(packs[packs.length - 1]) || "");
-          m3u8 = single(dec, 'sources:\\s*\\[\\{(?:file|src):"([^"]+)"');
-        } catch {
+        let dead = false;
+        for (const page of candidates2(url)) {
+          const got = await tryPage2(page);
+          if (got === "dead") {
+            dead = true;
+            continue;
+          }
+          if (got) return got;
         }
-        if (!m3u8) m3u8 = single(data, 'sources:\\s*\\[\\{(?:file|src):"([^"]+)"');
-        if (!m3u8) return { streams: [], error: "needs_browser" };
-        let host;
-        try {
-          host = new URL(url).origin;
-        } catch {
-          host = url.replace(/\/[^/]*$/, "");
-        }
-        return { streams: [{ url: m3u8, kind: streamKind(m3u8), server: "lulustream", referer: host + "/", headers: { Origin: host } }] };
+        return { streams: [], error: dead ? "dead" : "needs_browser" };
       }
     };
   }
@@ -1279,7 +1319,18 @@ function hostOf2(url) {
     return "";
   }
 }
-var HOSTS, ALPHABET2, rand10, doodstream_default;
+function liveMirrors(url) {
+  const h = hostOf2(url);
+  const id = (() => {
+    try {
+      return new URL(url).pathname.split("/").filter(Boolean).pop();
+    } catch {
+      return "";
+    }
+  })();
+  return id ? LIVE2.filter((x) => x !== h).map((x) => `https://${x}/e/${id}`) : [];
+}
+var HOSTS, LIVE2, ALPHABET2, rand10, doodstream_default;
 var init_doodstream = __esm({
   "src/extractors/doodstream.js"() {
     init_lib();
@@ -1310,6 +1361,7 @@ var init_doodstream = __esm({
       "all3do.com",
       "do0od.com"
     ]);
+    LIVE2 = ["playmogo.com"];
     ALPHABET2 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     rand10 = () => {
       let s = "";
@@ -1324,20 +1376,31 @@ var init_doodstream = __esm({
       },
       normalize: (url) => String(url).replace("/d/", "/e/"),
       async resolve(url) {
-        let origin;
         try {
-          origin = new URL(url).origin;
+          new URL(url);
         } catch {
           return { streams: [], error: "bad_request" };
         }
-        const page = await getTextCF(url, { referer: origin + "/" });
+        let page = "";
+        let pageUrl = url;
+        for (const candidate of [url, ...liveMirrors(url)]) {
+          try {
+            const r = await globalThis.kino.fetch(candidate, { headers: { "User-Agent": UA }, timeoutMs: 8e3 });
+            page = r.ok ? String(await r.text()) : "";
+            pageUrl = r.url || candidate;
+          } catch {
+            page = "";
+          }
+          if (/pass_md5/.test(page)) break;
+        }
         if (!page) return { streams: [], error: "needs_browser" };
-        if (/Video not found|not found|deleted|removed/i.test(page) && !/pass_md5/.test(page)) return { streams: [], error: "dead" };
+        const origin = new URL(pageUrl).origin;
         const path = (/\/pass_md5\/[\w\-/]+/.exec(page) || [])[0];
-        if (!path) return { streams: [], error: "needs_browser" };
-        const base = (await getTextCF(origin + path, { referer: url })).trim();
+        if (!path) return /Video not found|not found|deleted|removed/i.test(page) ? { streams: [], error: "dead" } : { streams: [], error: "needs_browser" };
+        const base = (await getTextCF(origin + path, { referer: pageUrl })).trim();
         if (!/^https?:\/\//.test(base)) return { streams: [], error: "needs_browser" };
-        const finalUrl = base + rand10();
+        const token = path.split("/").filter(Boolean).pop();
+        const finalUrl = `${base}${rand10()}?token=${token}&expiry=${Date.now()}`;
         return { streams: [{ url: finalUrl, kind: "mp4", server: "doodstream", referer: origin + "/", headers: { Referer: origin + "/" } }] };
       }
     };
@@ -1927,6 +1990,59 @@ var init_vidguard = __esm({
   }
 });
 
+// src/extractors/vidara.js
+function filecodeOf(url) {
+  try {
+    const parts = new URL(url).pathname.split("/").filter(Boolean);
+    return parts.pop() || "";
+  } catch {
+    return "";
+  }
+}
+function subtitlesOf(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((s) => s && typeof s === "object" && /^https:\/\//.test(s.file || s.url || "")).map((s) => ({ url: s.file || s.url, label: String(s.label || s.lang || ""), lang: String(s.lang || s.label || "").slice(0, 8).toLowerCase() }));
+}
+var RE17, vidara_default;
+var init_vidara = __esm({
+  "src/extractors/vidara.js"() {
+    init_lib();
+    RE17 = /vidara\.(?:so|to|cc|net|com)/i;
+    vidara_default = {
+      id: "vidara",
+      match: (url) => RE17.test(url),
+      async resolve(url) {
+        const k = globalThis.kino;
+        const code = filecodeOf(url);
+        let origin;
+        try {
+          origin = new URL(url).origin;
+        } catch {
+          return { streams: [], error: "bad_request" };
+        }
+        if (!code) return { streams: [], error: "bad_request" };
+        let j = null;
+        try {
+          const r = await k.fetch(origin + "/api/stream", {
+            method: "POST",
+            timeoutMs: 1e4,
+            headers: { "User-Agent": UA, "Content-Type": "application/json", Accept: "application/json", Referer: url, Origin: origin },
+            body: JSON.stringify({ filecode: code, device: "android", codecs: ["h264"] })
+          });
+          if (r.status === 404) return { streams: [], error: "dead" };
+          j = JSON.parse(await r.text());
+        } catch {
+          return { streams: [], error: "needs_browser" };
+        }
+        const src = j && typeof j.streaming_url === "string" ? j.streaming_url : "";
+        if (!/^https:\/\//.test(src)) return { streams: [], error: j && j.error ? "dead" : "needs_browser" };
+        const subtitles = subtitlesOf(j.subtitles);
+        return { streams: [{ url: src, kind: /\.m3u8/i.test(src) ? "hls" : "mp4", server: "vidara", referer: origin + "/" }], ...subtitles.length ? { subtitles } : {} };
+      }
+    };
+  }
+});
+
 // src/registry.js
 var registry_exports = {};
 __export(registry_exports, {
@@ -1973,7 +2089,8 @@ var init_registry = __esm({
     init_sendvid();
     init_turboembed();
     init_vidguard();
-    EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default, savefiles_default, rpmvid_default, sendvid_default, turboembed_default, vidguard_default];
+    init_vidara();
+    EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default, savefiles_default, rpmvid_default, sendvid_default, turboembed_default, vidguard_default, vidara_default];
   }
 });
 
