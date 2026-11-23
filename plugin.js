@@ -2157,17 +2157,39 @@ var BY_EXTRACTOR = {
 };
 var UNMEASURED = 50;
 var UNKNOWN = 10;
+var BY_NAME = [
+  [/^(?:voe|voesx)$/, "voe"],
+  [/^(?:okru|odnoklassniki)$/, "okru"],
+  [/^(?:lulu|luluvdo|lulustream)$/, "lulustream"],
+  [/^(?:vimeos|zures)$/, "zures"],
+  [/^vidara$/, "vidara"],
+  [/^hexload$/, "hexload"],
+  [/^(?:fmoon|filemoon|moonplayer)$/, "filemoon"],
+  [/^(?:swish|streamwish|wish|vhide|vidhide|filelions?)$/, "streamwish"],
+  [/^(?:dood|doodstream|ds2play|dsvplay)$/, "doodstream"],
+  [/^(?:mixdrop|mdrop)$/, "mixdrop"],
+  [/^(?:stape|streamtape)$/, "streamtape"],
+  [/^mp4upload$/, "mp4upload"],
+  [/^uqload$/, "uqload"],
+  [/^fastream$/, "fastream"],
+  [/^(?:vidguard|vgfplay|listeamed)$/, "vidguard"]
+];
+var scoreOfId = (id) => Object.prototype.hasOwnProperty.call(BY_EXTRACTOR, id) ? BY_EXTRACTOR[id] : UNMEASURED;
 function hostScore(url) {
   const u = String(url || "");
   for (const [re, score] of BY_HOST) if (re.test(u)) return score;
+  const bare = u.replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, "").toLowerCase();
+  if (bare && !bare.includes(".")) {
+    const key = bare.replace(/[^a-z0-9]/g, "");
+    for (const [re, id] of BY_NAME) if (re.test(key)) return scoreOfId(id);
+  }
   let ex = null;
   try {
     ex = findExtractor(u);
   } catch {
     ex = null;
   }
-  if (!ex) return UNKNOWN;
-  return Object.prototype.hasOwnProperty.call(BY_EXTRACTOR, ex.id) ? BY_EXTRACTOR[ex.id] : UNMEASURED;
+  return ex ? scoreOfId(ex.id) : UNKNOWN;
 }
 function rank({ urls } = {}) {
   const list = Array.isArray(urls) ? urls.slice(0, 64).map(String) : [];

@@ -1,7 +1,7 @@
 {
   "id": "kino-resolver",
   "name": "Kino Resolver",
-  "version": "0.0.35",
+  "version": "0.0.36",
   "apiVersion": 20,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -98,6 +98,6 @@
   },
   "signature": {
     "authorKey": "6693946bd5c56196960959c4b9665fad5094374bcb85ddb282f8bf762c835263",
-    "value": "854498de245cdabc543b2d27b6f5512e740a9a8a1508f656b47624db3561b92d42cd831120fa60018cddda794923b6b5372faa510b956ed1cf5de6995ac6d70e"
+    "value": "6f4f64b6566bbf5a50112aa3214e27d70211bce5f97092fa8c975be1f4e6eb7ec02680c66602517b4f113c970ff0fbbc39807abd40fc052cc96afff23438db0f"
   }
 }
