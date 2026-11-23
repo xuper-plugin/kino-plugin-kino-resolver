@@ -303,10 +303,9 @@ function idOf(url) {
 }
 function candidates(url) {
   const id = idOf(url);
-  const out = [url];
-  if (!id) return out;
+  if (!id) return [url];
   const vid = VIDHIDE_RE.test(url);
-  for (const h of vid ? VIDHIDE_MIRRORS : WISH_MIRRORS) out.push(`https://${h}/${vid ? "v" : "e"}/${id}`);
+  const list = vid ? VIDHIDE_MIRRORS : WISH_MIRRORS;
   const own = (() => {
     try {
       return new URL(url).hostname.replace(/^www\./, "");
@@ -314,7 +313,9 @@ function candidates(url) {
       return "";
     }
   })();
-  return out.filter((u, i) => i === 0 || !u.includes("//" + own + "/")).slice(0, MAX_TRIES);
+  const mirrors = list.filter((h) => h !== own).map((h) => `https://${h}/${vid ? "v" : "e"}/${id}`);
+  const out = vid && !list.includes(own) ? [...mirrors, url] : [url, ...mirrors];
+  return out.slice(0, MAX_TRIES);
 }
 async function tryPage(url) {
   let pageUrl = url;
@@ -336,47 +337,7 @@ async function tryPage(url) {
     return null;
   }
 }
-function firstOf(pages, { stagger = STAGGER_MS, attempt = tryPage } = {}) {
-  return new Promise((done) => {
-    let next = 0, running = 0, dead = false, finished = false;
-    const end = (v) => {
-      if (!finished) {
-        finished = true;
-        done(v);
-      }
-    };
-    const launch = () => {
-      if (finished || next >= pages.length) return;
-      const mine = next;
-      const page = pages[next++];
-      running++;
-      if (next < pages.length) waitWhile(stagger, () => !finished && next === mine + 1).then((still) => {
-        if (still) launch();
-      });
-      Promise.resolve().then(() => attempt(page)).catch(() => null).then((got) => {
-        running--;
-        if (got === "dead") dead = true;
-        else if (got) return end(got);
-        if (next < pages.length) launch();
-        else if (running === 0) end({ streams: [], error: dead ? "dead" : "needs_browser" });
-      });
-    };
-    launch();
-  });
-}
-async function waitWhile(ms, still) {
-  const sleep = (n) => globalThis.kino && typeof kino.sleep === "function" ? kino.sleep(n) : new Promise((r) => setTimeout(r, n));
-  for (let left = ms; left > 0; left -= 250) {
-    if (!still()) return false;
-    try {
-      await sleep(Math.min(250, left));
-    } catch {
-      return false;
-    }
-  }
-  return still();
-}
-var RE2, VIDHIDE_RE, WISH_MIRRORS, VIDHIDE_MIRRORS, MAX_TRIES, PAGE_MS, GATE, DEAD, streamwish_default, STAGGER_MS;
+var RE2, VIDHIDE_RE, WISH_MIRRORS, VIDHIDE_MIRRORS, MAX_TRIES, PAGE_MS, GATE, DEAD, streamwish_default;
 var init_streamwish = __esm({
   "src/extractors/streamwish.js"() {
     init_lib();
@@ -393,10 +354,18 @@ var init_streamwish = __esm({
       match: (url) => RE2.test(url),
       normalize: (url) => String(url || "").replace(/\\/g, "").trim(),
       async resolve(url) {
-        return firstOf(candidates(url));
+        let dead = false;
+        for (const page of candidates(url)) {
+          const got = await tryPage(page);
+          if (got === "dead") {
+            dead = true;
+            continue;
+          }
+          if (got) return got;
+        }
+        return { streams: [], error: dead ? "dead" : "needs_browser" };
       }
     };
-    STAGGER_MS = 1500;
   }
 });
 
@@ -1685,7 +1654,6 @@ async function resolveContent(ref) {
 }
 
 // src/plugin.js
-globalThis.__kinoDropPendingFetches = true;
 var proto_resolver_resolve = (arg) => resolve(arg || {});
 var proto_resolver_unpack = (arg) => doUnpack(arg || {});
 var proto_resolver_normalizeHost = (arg) => doNormalizeHost(arg || {});
