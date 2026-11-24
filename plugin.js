@@ -321,8 +321,8 @@ function absolute(href, base) {
     return href || null;
   }
 }
-function langCode(label) {
-  const s = String(label || "").trim();
+function langCode(label2) {
+  const s = String(label2 || "").trim();
   for (const [re, code] of LANG_CODES) if (re.test(s)) return code;
   return null;
 }
@@ -336,11 +336,11 @@ function captionTracks(text, base) {
     if (kind && kind !== "captions" && kind !== "subtitles") continue;
     const file = field("file");
     const format = (/\.(vtt|srt)(?:[?#]|$)/i.exec(file) || [])[1];
-    const label = field("label");
-    const lang = langCode(label);
+    const label2 = field("label");
+    const lang = langCode(label2);
     const url = format && lang ? absolute(file, base) : null;
     if (!url || out.some((t) => t.url === url)) continue;
-    out.push({ lang, url, label, format: format.toLowerCase() });
+    out.push({ lang, url, label: label2, format: format.toLowerCase() });
   }
   return out;
 }
@@ -582,18 +582,34 @@ function playerLinks(unpacked, pageUrl) {
   add(single(unpacked, 'file\\s*:\\s*"([^"]+\\.m3u8[^"]*)"'));
   return out;
 }
-async function answeringFirst(urls, referer, ask = askPlaylist) {
-  if (urls.length < 2) return urls;
-  const asked = (u) => Promise.resolve().then(() => ask(u, referer)).catch(() => false);
-  if (await asked(urls[0])) return urls;
-  const rest = urls.slice(1);
-  const ok = await Promise.all(rest.map(asked));
-  const good = rest.filter((_, i2) => ok[i2]);
-  return good.length ? [...good, ...rest.filter((_, i2) => !ok[i2]), urls[0]] : urls;
+function firstTrue(promises) {
+  return new Promise((done) => {
+    let left = promises.length;
+    if (!left) done(-1);
+    promises.forEach((p, i2) => p.then((v) => {
+      if (v === true) done(i2);
+      else if (--left === 0) done(-1);
+    }));
+  });
 }
-async function askPlaylist(url, referer) {
-  const r = await globalThis.kino.fetch(url, { headers: { "User-Agent": UA, Referer: referer }, timeoutMs: PROBE_MS });
-  if (!r || !r.ok) return false;
+async function probeMasters(urls, referer, ask = askPlaylist) {
+  if (urls.length < 2) return { urls, refused: false };
+  const got = urls.map(() => null);
+  const asked = urls.map((u, i2) => Promise.resolve().then(() => ask(u, referer, i2 === 0 ? FIRST_MS : PROBE_MS)).catch(() => false).then((v) => got[i2] = v));
+  if (await asked[0] === true) return { urls, refused: false };
+  const win = await firstTrue(asked.slice(1));
+  if (win >= 0) {
+    const w = win + 1;
+    const tier = (i2) => i2 === w ? 0 : got[i2] === true ? 1 : got[i2] === null ? 2 : 3;
+    return { urls: urls.map((u, i2) => ({ u, i: i2 })).sort((x, y) => tier(x.i) - tier(y.i) || x.i - y.i).map((x) => x.u), refused: false };
+  }
+  const order = urls.map((u, i2) => ({ u, i: i2 })).sort((x, y) => (got[x.i] === REFUSED) - (got[y.i] === REFUSED) || x.i - y.i).map((x) => x.u);
+  return { urls: order, refused: got.every((g) => g === REFUSED) };
+}
+async function askPlaylist(url, referer, timeoutMs = PROBE_MS) {
+  const r = await globalThis.kino.fetch(url, { headers: { "User-Agent": UA, Referer: referer }, timeoutMs });
+  if (!r) return false;
+  if (!r.ok) return r.status >= 400 ? REFUSED : false;
   return /#EXTM3U/.test(String(await r.text()).slice(0, 200));
 }
 async function tryPage(url) {
@@ -602,7 +618,16 @@ async function tryPage(url) {
     const r = await fetchManual(pageUrl, { timeoutMs: PAGE_MS, headers: { "User-Agent": UA } });
     if (!r) return null;
     const loc = locationOf(r);
-    if (loc) pageUrl = loc;
+    if (loc) {
+      let next = null;
+      try {
+        next = new URL(loc, pageUrl).href;
+      } catch {
+        next = null;
+      }
+      if (!next || !inFamily(next)) return "moved";
+      pageUrl = next;
+    }
     const data = !loc && r.status === 200 && typeof r.text === "function" ? String(await r.text()) : await getTextCF(pageUrl, { timeoutMs: PAGE_MS });
     if (GATE.test(data)) return null;
     if (DEAD.test(data) && !/p,a,c,k,e,d/.test(data)) return "dead";
@@ -610,7 +635,8 @@ async function tryPage(url) {
     const unpacked = String(unpack(pack) || "");
     const found = playerLinks(unpacked, pageUrl);
     if (!found.length) return null;
-    const urls = await answeringFirst(found, pageUrl);
+    const { urls, refused } = await probeMasters(found, pageUrl);
+    if (refused) return "broken";
     const subtitles = pageSubtitles(data, unpacked, pageUrl);
     const server = VIDHIDE_RE.test(url) ? "vidhide" : "streamwish";
     return { streams: urls.map((u) => ({ url: u, kind: "hls", server, referer: pageUrl })), ...subtitles.length ? { subtitles } : {} };
@@ -618,29 +644,53 @@ async function tryPage(url) {
     return null;
   }
 }
-var RE2, VIDHIDE_RE, WISH_MIRRORS, VIDHIDE_MIRRORS, MAX_TRIES, PAGE_MS, GATE, DEAD, PROBE_MS, streamwish_default;
+var RE2, VIDHIDE_RE, WISH_MIRRORS, VIDHIDE_MIRRORS, MAX_TRIES, PAGE_MS, GATE, DEAD, PROBE_MS, FIRST_MS, REFUSED, inFamily, MOVERS, hostname, streamwish_default;
 var init_streamwish = __esm({
   "src/extractors/streamwish.js"() {
     init_lib();
-    RE2 = /stream.?wish|strwish|embedwish|wishembed|awish|dwish|mwish|wishfast|sfastwish|flaswish|obeywish|cdnwish|asnwish|flastwish|jodwish|swhoi|swdyu|wishonly|playerwish|hlswish|iplayerhls|hlsflast|ghbrisk|cybervynx|streamhg|hlsflex|hglink|hgplaycdn|vibuxer|yuguaab|wish|vidhide|filelion|filelions|lionsflix|dhcplay|dhtpre|kravaxxa|smoothpre|dintezuvio|minochinos|morencius|callistanise/i;
+    RE2 = /stream.?wish|strwish|embedwish|wishembed|awish|dwish|mwish|wishfast|sfastwish|flaswish|obeywish|cdnwish|asnwish|flastwish|jodwish|swhoi|swdyu|wishonly|playerwish|hlswish|iplayerhls|hlsflast|ghbrisk|cybervynx|streamhg|hlsflex|hglink|hgplaycdn|vibuxer|audinifer|yuguaab|wish|vidhide|filelion|filelions|lionsflix|dhcplay|dhtpre|kravaxxa|smoothpre|dintezuvio|minochinos|morencius|callistanise/i;
     VIDHIDE_RE = /vidhide|filelion|lionsflix|dhcplay|dhtpre|kravaxxa|smoothpre|dintezuvio|minochinos|morencius|callistanise/i;
-    WISH_MIRRORS = ["vibuxer.com", "playerwish.com", "embedwish.com", "iplayerhls.com"];
+    WISH_MIRRORS = ["vibuxer.com", "iplayerhls.com", "playerwish.com", "embedwish.com"];
     VIDHIDE_MIRRORS = ["callistanise.com", "morencius.com", "smoothpre.com"];
     MAX_TRIES = 4;
     PAGE_MS = 5e3;
     GATE = /Page is loading, please wait|<title>Loading\.\.\.<\/title>/i;
     DEAD = /Not Found|File was deleted|is no longer available|temporarily not available/i;
     PROBE_MS = 4e3;
+    FIRST_MS = 2500;
+    REFUSED = "refused";
+    inFamily = (u) => {
+      try {
+        return RE2.test(new URL(u).hostname);
+      } catch {
+        return false;
+      }
+    };
+    MOVERS = /^(?:vibuxer|playerwish|embedwish)\.com$/i;
+    hostname = (u) => {
+      try {
+        return new URL(u).hostname.replace(/^www\./, "");
+      } catch {
+        return "";
+      }
+    };
     streamwish_default = {
       id: "streamwish",
       match: (url) => RE2.test(url),
       normalize: (url) => String(url || "").replace(/\\/g, "").trim(),
       async resolve(url) {
-        let dead = false;
+        let dead = 0, moved = false;
         for (const page of candidates(url)) {
+          if (moved && MOVERS.test(hostname(page))) continue;
           const got = await tryPage(page);
+          if (got === "moved") {
+            moved = true;
+            continue;
+          }
+          if (got === "broken") return { streams: [], error: "dead" };
           if (got === "dead") {
-            dead = true;
+            dead += 1;
+            if (dead >= 2) break;
             continue;
           }
           if (got) return got;
@@ -787,7 +837,7 @@ var init_uqload = __esm({
       id: "uqload",
       match: (url) => /uqload/i.test(url),
       normalize(url) {
-        let p = url;
+        let p = url.replace(/\/\/(?:www\.)?uqload\.to\//i, "//uqload.vc/");
         if (!p.includes("embed-")) p = p.replace(/\/uqload\.(?:com|org|co|io|to|ws|net|cx|bz|is|vc)\//, "/uqload.com/embed-");
         if (!p.endsWith(".html")) p += ".html";
         return p.replace(".html/.html", ".html");
@@ -949,33 +999,6 @@ var init_streamhide = __esm({
   }
 });
 
-// src/extractors/streamlare.js
-var streamlare_default;
-var init_streamlare = __esm({
-  "src/extractors/streamlare.js"() {
-    init_lib();
-    streamlare_default = {
-      id: "streamlare",
-      match: (url) => /streamlare|slmaxed|slwatch|sltube|streamlure/i.test(url),
-      async resolve(url) {
-        const data = await getTextCF(url);
-        if (/Not Found|File was deleted|is no longer available/i.test(data)) return { streams: [], error: "dead" };
-        const id = single(url, "/e/(\\w+)") || single(url, "/v/(\\w+)");
-        if (!id) return { streams: [], error: "no_streams" };
-        let media = "";
-        try {
-          const r = await kino.fetch("https://streamlare.com/api/video/stream/get", { method: "POST", body: { form: { id } } });
-          const j = JSON.parse(typeof r.text === "function" ? await r.text() : "null");
-          media = j && j.result && j.result.file || "";
-        } catch {
-        }
-        if (!media) return { streams: [], error: "needs_browser" };
-        return { streams: [{ url: media, kind: streamKind(media), server: "streamlare", referer: url }] };
-      }
-    };
-  }
-});
-
 // src/extractors/supervideo.js
 var REF, supervideo_default;
 var init_supervideo = __esm({
@@ -1126,7 +1149,12 @@ var init_goodstream = __esm({
       async resolve(url) {
         let page = url, referer;
         if (url.includes("|")) [page, referer] = url.split("|");
-        const data = await getTextCF(page, { referer: referer || "https://goodstream.one/", timeoutMs: 6e3 });
+        let data = "";
+        try {
+          data = await getTextCF(page, { referer: referer || "https://goodstream.one/", timeoutMs: 4e3 });
+        } catch {
+          return { streams: [], error: "dead" };
+        }
         if (/File (is )?(no longer available|not found|was deleted|has been deleted)|Error 404|404 - No encontrado/i.test(data)) return { streams: [], error: "dead" };
         let unpacked = "";
         try {
@@ -1213,7 +1241,8 @@ var init_mixdrop = __esm({
     mixdrop_default = {
       id: "mixdrop",
       match: (url) => RE7.test(url),
-      normalize: (url) => url.replace("/f/", "/e/"),
+      // mixdrop.is is for sale (a parking page, 2026-11-24); the same id answers on mixdrop.top.
+      normalize: (url) => url.replace("/f/", "/e/").replace(/\/\/(?:www\.)?mixdrop\.is\//i, "//mixdrop.top/"),
       async resolve(url) {
         let data = await getTextCF(url);
         const loc = single(data, 'window\\.location\\s*=\\s*"([^"]+)"');
@@ -1413,7 +1442,8 @@ var init_doodstream = __esm({
       "myvidplay.com",
       "playmogo.com",
       "all3do.com",
-      "do0od.com"
+      "do0od.com",
+      "do7go.com"
     ]);
     LIVE2 = ["playmogo.com"];
     ALPHABET2 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -2125,7 +2155,6 @@ var init_registry = __esm({
     init_streamvid();
     init_fastream();
     init_streamhide();
-    init_streamlare();
     init_supervideo();
     init_okru();
     init_zures();
@@ -2144,14 +2173,26 @@ var init_registry = __esm({
     init_turboembed();
     init_vidguard();
     init_vidara();
-    EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, streamlare_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default, savefiles_default, rpmvid_default, sendvid_default, turboembed_default, vidguard_default, vidara_default];
+    EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default, savefiles_default, rpmvid_default, sendvid_default, turboembed_default, vidguard_default, vidara_default];
   }
 });
 
 // src/rank.js
 init_registry();
 var NEVER = -1;
+var DEFUNCT = /^(?:[a-z0-9-]+\.)*(?:fembed\.com|embedo\.co|streamlare\.com|slmaxed\.com|slwatch\.co|sltube\.org|upstream\.to)$/i;
+function isDefunct(url) {
+  try {
+    return DEFUNCT.test(new URL(String(url)).hostname);
+  } catch {
+    return false;
+  }
+}
 var BY_HOST = [
+  [/fembed\.com|embedo\.co|streamlare\.com|slmaxed\.com|slwatch\.co|sltube\.org|upstream\.to/i, NEVER],
+  // closed hosters (see DEFUNCT)
+  [/goodstream/i, 5],
+  // goodstream.one does not answer at all (11-22 and 11-24): last, and its timeout is "dead"
   [/streamplay|straemplay|powvideo|powwideo/i, 0],
   // a Google reCAPTCHA v2 before the video
   // Waaw/netu: a click-on-image check that not even Kino's visible window got past (owner, 2026-11-23: "quitemos siempre netu
@@ -2243,9 +2284,54 @@ function rank({ urls } = {}) {
 // src/engine.js
 init_lib();
 init_registry();
+
+// src/extractors/generic.js
+init_lib();
+init_streamwish();
+var DEAD3 = /File is no longer available|File was deleted|has been deleted|File Not Found|The file expired|video (?:was|has been) (?:deleted|removed)/i;
+var PAGE_MS3 = 4e3;
+var SKIP = /mega\.nz|streamplay|straemplay|powvideo|powwideo|waaw|hqq\.|netu|vgembed|videoapp\.zip|strp2p/i;
+var label = (url) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").split(".")[0];
+  } catch {
+    return "server";
+  }
+};
+var generic_default = {
+  id: "generic",
+  match: (url) => /^https:\/\//i.test(String(url || "")) && !SKIP.test(url),
+  async resolve(url) {
+    let data = "";
+    try {
+      data = String(await getTextCF(url, { timeoutMs: PAGE_MS3 }));
+    } catch {
+      return { streams: [], error: "needs_browser" };
+    }
+    const packed = /p,a,c,k,e,d/.test(data);
+    if (DEAD3.test(data) && !packed) return { streams: [], error: "dead" };
+    if (!packed) return { streams: [], error: "needs_browser" };
+    let unpacked = "";
+    try {
+      unpacked = String(unpack(single(data, "p,a,c,k,e,d.*?<\/script>")) || "");
+    } catch {
+      unpacked = "";
+    }
+    const found = playerLinks(unpacked, url);
+    if (!found.length) return { streams: [], error: "needs_browser" };
+    const { urls, refused } = await probeMasters(found, url);
+    if (refused) return { streams: [], error: "dead" };
+    const subtitles = pageSubtitles(data, unpacked, url);
+    const server = label(url);
+    return { streams: urls.map((u) => ({ url: u, kind: "hls", server, referer: url })), ...subtitles.length ? { subtitles } : {} };
+  }
+};
+
+// src/engine.js
 async function resolve({ url, referer } = {}) {
   if (!url) return { streams: [], error: "bad_request" };
-  const ex = findExtractor(url);
+  if (isDefunct(url)) return { streams: [], error: "dead" };
+  const ex = findExtractor(url) || (generic_default.match(url) ? generic_default : null);
   if (!ex) return { streams: [], error: "needs_browser" };
   const target = ex.normalize ? ex.normalize(url) : url;
   try {
@@ -2364,6 +2450,7 @@ async function resolveContent(ref) {
 }
 
 // src/plugin.js
+globalThis.__kinoDropPendingFetches = true;
 var proto_resolver_resolve = (arg) => resolve(arg || {});
 var proto_resolver_unpack = (arg) => doUnpack(arg || {});
 var proto_resolver_normalizeHost = (arg) => doNormalizeHost(arg || {});
