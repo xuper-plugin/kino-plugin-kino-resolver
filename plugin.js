@@ -16,11 +16,11 @@ function makeUnbaser(base) {
   if (base >= 2 && base <= 36) return (s) => parseInt(s, base);
   if (!alpha) throw new Error("Unsupported base encoding.");
   const dict = {};
-  for (let i = 0; i < alpha.length; i++) dict[alpha[i]] = i;
+  for (let i2 = 0; i2 < alpha.length; i2++) dict[alpha[i2]] = i2;
   return (s) => {
     let ret = 0;
     const rev = [...String(s)].reverse();
-    for (let i = 0; i < rev.length; i++) ret += Math.pow(base, i) * (dict[rev[i]] || 0);
+    for (let i2 = 0; i2 < rev.length; i2++) ret += Math.pow(base, i2) * (dict[rev[i2]] || 0);
     return ret;
   };
 }
@@ -45,8 +45,8 @@ function replacestrings(source) {
     const startpoint = m[0].length;
     const lookup = strings.split('","');
     let s = source;
-    lookup.forEach((v, i) => {
-      s = s.split(`${varname}[${i}]`).join(`"${v}"`);
+    lookup.forEach((v, i2) => {
+      s = s.split(`${varname}[${i2}]`).join(`"${v}"`);
     });
     return s.slice(startpoint);
   }
@@ -284,8 +284,8 @@ function b64decode(input) {
   }
   const str = String(input).replace(/[^A-Za-z0-9+/]/g, "");
   let out = "";
-  for (let i = 0; i < str.length; ) {
-    const e1 = B64.indexOf(str[i++]), e2 = B64.indexOf(str[i++]), e3 = B64.indexOf(str[i++]), e4 = B64.indexOf(str[i++]);
+  for (let i2 = 0; i2 < str.length; ) {
+    const e1 = B64.indexOf(str[i2++]), e2 = B64.indexOf(str[i2++]), e3 = B64.indexOf(str[i2++]), e4 = B64.indexOf(str[i2++]);
     out += String.fromCharCode(e1 << 2 | e2 >> 4);
     if (e3 >= 0) out += String.fromCharCode((e2 & 15) << 4 | e3 >> 2);
     if (e4 >= 0) out += String.fromCharCode((e3 & 3) << 6 | e4);
@@ -295,8 +295,8 @@ function b64decode(input) {
 function b64encode(input) {
   const s = String(input);
   let out = "";
-  for (let i = 0; i < s.length; i += 3) {
-    const a = s.charCodeAt(i) & 255, b = i + 1 < s.length ? s.charCodeAt(i + 1) & 255 : NaN, c = i + 2 < s.length ? s.charCodeAt(i + 2) & 255 : NaN;
+  for (let i2 = 0; i2 < s.length; i2 += 3) {
+    const a = s.charCodeAt(i2) & 255, b = i2 + 1 < s.length ? s.charCodeAt(i2 + 1) & 255 : NaN, c = i2 + 2 < s.length ? s.charCodeAt(i2 + 2) & 255 : NaN;
     out += B64[a >> 2] + B64[(a & 3) << 4 | (b || 0) >> 4];
     out += Number.isNaN(b) ? "=" : B64[(b & 15) << 2 | (c || 0) >> 6];
     out += Number.isNaN(c) ? "=" : B64[c & 63];
@@ -380,9 +380,9 @@ var init_lib = __esm({
   "src/lib.js"() {
     init_jsunpack();
     init_cloudflare();
-    single = (data, patron, i = 0) => {
+    single = (data, patron, i2 = 0) => {
       try {
-        const v = findall(patron, data)[i];
+        const v = findall(patron, data)[i2];
         return v === void 0 ? "" : v;
       } catch {
         return "";
@@ -421,7 +421,7 @@ function voeDecode(data) {
     for (const j of JUNK) s = s.split(j).join("");
     const dec1 = b64decode(s);
     let shifted = "";
-    for (let i = 0; i < dec1.length; i++) shifted += String.fromCharCode((dec1.charCodeAt(i) - 3 + 256) % 256);
+    for (let i2 = 0; i2 < dec1.length; i2++) shifted += String.fromCharCode((dec1.charCodeAt(i2) - 3 + 256) % 256);
     const out = b64decode([...shifted].reverse().join(""));
     return JSON.parse(out);
   } catch {
@@ -584,9 +584,12 @@ function playerLinks(unpacked, pageUrl) {
 }
 async function answeringFirst(urls, referer, ask = askPlaylist) {
   if (urls.length < 2) return urls;
-  const ok = await Promise.all(urls.map((u) => ask(u, referer).catch(() => false)));
-  const good = urls.filter((_, i) => ok[i]);
-  return good.length ? [...good, ...urls.filter((_, i) => !ok[i])] : urls;
+  const asked = (u) => Promise.resolve().then(() => ask(u, referer)).catch(() => false);
+  if (await asked(urls[0])) return urls;
+  const rest = urls.slice(1);
+  const ok = await Promise.all(rest.map(asked));
+  const good = rest.filter((_, i2) => ok[i2]);
+  return good.length ? [...good, ...rest.filter((_, i2) => !ok[i2]), urls[0]] : urls;
 }
 async function askPlaylist(url, referer) {
   const r = await globalThis.kino.fetch(url, { headers: { "User-Agent": UA, Referer: referer }, timeoutMs: PROBE_MS });
@@ -649,19 +652,43 @@ var init_streamwish = __esm({
 });
 
 // src/extractors/streamtape.js
+function joined(expr) {
+  let out = "";
+  for (const m of expr.matchAll(PART)) {
+    if (m[1] !== void 0 || m[2] !== void 0) {
+      out += m[1] ?? m[2];
+      continue;
+    }
+    let v = m[3] ?? m[4];
+    for (const c of (m[5] || "").matchAll(CUT)) v = v.slice(Number(c[1]));
+    out += v;
+  }
+  return out;
+}
+function tokenUrl(html) {
+  const found = [];
+  for (const m of String(html || "").matchAll(ASSIGN)) {
+    const v = joined(m[2]);
+    const i2 = v.indexOf("get_video?");
+    if (i2 >= 0 && /[?&]id=/.test(v)) found.push({ id: m[1], path: v.slice(i2) });
+  }
+  const pick = found.filter((f) => f.id === "robotlink").pop() || found.pop();
+  return pick ? "https://streamtape.com/" + pick.path + "&stream=1" : null;
+}
 async function aux(pageUrl) {
   const data = await getTextCF(pageUrl, { referer: pageUrl });
   if (data.includes("Video not found")) return { dead: true, streams: [] };
-  const token = single(data, TOKEN);
-  if (!token) return { streams: [] };
-  return { streams: [{ url: "https://streamtape.com/" + token + "&stream=1", kind: "mp4", server: "streamtape" }] };
+  const url = tokenUrl(data);
+  return url ? { streams: [{ url, kind: "mp4", server: "streamtape" }] } : { streams: [] };
 }
-var RE3, TOKEN, streamtape_default;
+var RE3, ASSIGN, PART, CUT, streamtape_default;
 var init_streamtape = __esm({
   "src/extractors/streamtape.js"() {
     init_lib();
     RE3 = /streamtape|str(?:tape|cloud)|stape|tapewithadblock|streamadblock|watchadsontape|shavetape|strtpe/i;
-    TOKEN = `getElementById\\('\\w+link'\\).innerHTML = "[^"]+" .* \\('.+?/([^']+)'\\)`;
+    ASSIGN = /getElementById\(\s*['"](\w*link)['"]\s*\)\.innerHTML\s*=\s*([^;\n]+)/g;
+    PART = /'([^']*)'|"([^"]*)"|\(\s*(?:'([^']*)'|"([^"]*)")\s*\)((?:\.(?:substring|substr|slice)\(\s*\d+\s*\))*)/g;
+    CUT = /\.(?:substring|substr|slice)\(\s*(\d+)\s*\)/g;
     streamtape_default = {
       id: "streamtape",
       match: (url) => RE3.test(url),
@@ -1119,6 +1146,18 @@ var init_goodstream = __esm({
 });
 
 // src/extractors/nupload.js
+async function kindOf(fileUrl, origin) {
+  try {
+    const r = await globalThis.kino.fetch(fileUrl, { headers: { "User-Agent": UA, Referer: origin + "/", Origin: origin, Range: "bytes=0-2047" }, maxBytes: 2048, timeoutMs: 5e3 });
+    const h = r && r.headers || {};
+    const type = String(h["content-type"] || h["Content-Type"] || "");
+    if (/mpegurl/i.test(type)) return "hls";
+    if (/^video/ / i.test(type)) return "mp4";
+    if (r && typeof r.text === "function" && /^s*#EXTM3U/.test(String(await r.text()).slice(0, 64))) return "hls";
+  } catch {
+  }
+  return streamKind(fileUrl);
+}
 var RE6, nupload_default;
 var init_nupload = __esm({
   "src/extractors/nupload.js"() {
@@ -1159,7 +1198,7 @@ var init_nupload = __esm({
           return { streams: [], error: "needs_browser" };
         }
         if (!/^https:\/\//i.test(fileUrl)) return { streams: [], error: "needs_browser" };
-        return { streams: [{ url: fileUrl, kind: streamKind(fileUrl), server: "nupload", referer: origin + "/", headers: { Origin: origin } }] };
+        return { streams: [{ url: fileUrl, kind: await kindOf(fileUrl, origin), server: "nupload", referer: origin + "/", headers: { Origin: origin } }] };
       }
     };
   }
@@ -1380,7 +1419,7 @@ var init_doodstream = __esm({
     ALPHABET2 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     rand10 = () => {
       let s = "";
-      for (let i = 0; i < 10; i++) s += ALPHABET2[Math.floor(Math.random() * ALPHABET2.length)];
+      for (let i2 = 0; i2 < 10; i2++) s += ALPHABET2[Math.floor(Math.random() * ALPHABET2.length)];
       return s;
     };
     doodstream_default = {
@@ -1472,8 +1511,8 @@ var init_hexload = __esm({
 // src/extractors/filemoon.js
 function byseHash(str, words) {
   let e0 = 1779033703, e1 = 3144134277, e2 = 1013904242, e3 = 2773480762, t;
-  for (let i = 0; i < str.length; i++) {
-    e0 = e0 + (str.charCodeAt(i) & 255) >>> 0;
+  for (let i2 = 0; i2 < str.length; i2++) {
+    e0 = e0 + (str.charCodeAt(i2) & 255) >>> 0;
     e0 = (e0 << 7 | e0 >>> 25) >>> 0;
     e0 = e0 + e1 >>> 0;
     t = (e3 ^ e0) >>> 0;
@@ -1503,7 +1542,7 @@ function byseHash(str, words) {
     e1 = (t << 7 | t >>> 25) >>> 0;
   }
   const r = new Uint32Array(BE);
-  for (let i = 0; i < BE; i++) {
+  for (let i2 = 0; i2 < BE; i2++) {
     e0 = e0 + e1 >>> 0;
     t = (e3 ^ e0) >>> 0;
     e3 = (t << 16 | t >>> 16) >>> 0;
@@ -1516,7 +1555,7 @@ function byseHash(str, words) {
     e2 = e2 + e3 >>> 0;
     t = (e1 ^ e2) >>> 0;
     e1 = (t << 7 | t >>> 25) >>> 0;
-    r[i] = (e0 ^ e2) >>> 0;
+    r[i2] = (e0 ^ e2) >>> 0;
   }
   for (let rd = 0; rd < 2; rd++) for (let s = 0; s < BE; s++) {
     let c = r[s] + r[r[s] & LT] >>> 0;
@@ -1538,7 +1577,7 @@ function byseHash(str, words) {
     e1 = (t << 7 | t >>> 25) >>> 0;
   }
   const out = new Uint32Array(words), por = BE >> 3;
-  for (let i = 0; i < words; i++) {
+  for (let i2 = 0; i2 < words; i2++) {
     e0 = e0 + e1 >>> 0;
     t = (e3 ^ e0) >>> 0;
     e3 = (t << 16 | t >>> 16) >>> 0;
@@ -1552,14 +1591,14 @@ function byseHash(str, words) {
     t = (e1 ^ e2) >>> 0;
     e1 = (t << 7 | t >>> 25) >>> 0;
     let v = e0;
-    const a = i * por;
+    const a = i2 * por;
     for (let c = 0; c < por; c++) {
       const d = r[a + c];
       v = v + d >>> 0;
       v = (v << 5 | v >>> 27) >>> 0;
       v = (v ^ Math.imul(d, HR) >>> 0) >>> 0;
     }
-    out[i] = (v ^ e2) >>> 0;
+    out[i2] = (v ^ e2) >>> 0;
   }
   return out;
 }
@@ -1575,8 +1614,8 @@ function solvePow(nonce, difficulty, deadline) {
 }
 function binToHex(bin) {
   let h = "";
-  for (let i = 0; i < bin.length; i++) {
-    const x = bin.charCodeAt(i) & 255;
+  for (let i2 = 0; i2 < bin.length; i2++) {
+    const x = bin.charCodeAt(i2) & 255;
     h += (x < 16 ? "0" : "") + x.toString(16);
   }
   return h;
@@ -1961,10 +2000,10 @@ function decodeSig(url) {
     const padded = pad === 2 ? b64 + "==" : pad === 3 ? b64 + "=" : b64;
     const decoded = b64decode(padded);
     const arr = decoded.slice(0, -5).split("").reverse();
-    for (let i = 0; i + 1 < arr.length; i += 2) {
-      const t = arr[i];
-      arr[i] = arr[i + 1];
-      arr[i + 1] = t;
+    for (let i2 = 0; i2 + 1 < arr.length; i2 += 2) {
+      const t = arr[i2];
+      arr[i2] = arr[i2 + 1];
+      arr[i2 + 1] = t;
     }
     const finalData = arr.join("").slice(0, -5);
     if (!finalData) return url;
@@ -2120,43 +2159,45 @@ var BY_HOST = [
   [/waaw|hqq\.|netu/i, NEVER],
   [/mega\.nz/i, 3],
   // no extractor (client-side decryption)
-  [/hglink\.to/i, 55],
-  // often answers files the mirrors say are deleted (6 of 7 on 2026-11-23)
+  [/hglink\.to/i, 45],
+  // often answers files the mirrors say are deleted (6 of 7 on 11-23, 7 of 10 on 11-24), ~4 s each
   [/filemoon\.to/i, 40],
-  // 3.1 Mbit/s, 10 s to start
-  [/savefiles/i, 15]
-  // 0.7 Mbit/s
+  // 2.7-3.1 Mbit/s, 6.5-10 s to start
+  [/savefiles/i, 25]
+  // 0.7 Mbit/s on 11-23, 4.8 Mbit/s on 11-24; Cloudflare-gated at times
 ];
 var BY_EXTRACTOR = {
   streamwish: 95,
-  // VidHide/StreamWish with hls4: 13-22 Mbit/s, 1.5-3 s to start
+  // VidHide/StreamWish with hls4: 9-24 Mbit/s, 1.5-5 s to start (11 of 11 morencius on 11-24)
   mixdrop: 85,
-  // 8.7 Mbit/s
+  // 8.7-9 Mbit/s
   streamtape: 85,
-  // 8-9 Mbit/s
+  // 8-9 Mbit/s (inline again since 0.0.39: the page builds its link from .substring() parts)
   doodstream: 80,
-  // 6-9 Mbit/s
+  // 5.5-9 Mbit/s
   filemoon: 75,
-  // bysekoze/bysewihe 7-7.5 Mbit/s
+  // bysekoze/bysewihe 4.5-7.5 Mbit/s
   voe: 72,
-  // 5.8 Mbit/s, 4 s, 14 of 18 resolved
-  lulustream: 70,
-  // 5-6 Mbit/s 1080p
+  // 5.5-5.8 Mbit/s, 4-6 s; its misses are deleted files (404)
+  lulustream: 65,
+  // 5-6 Mbit/s 1080p on 11-23; luluvdo 3.4 Mbit/s on 11-24
   okru: 65,
-  // 6.7 Mbit/s, many blocked files
+  // 6.7-7 Mbit/s, many blocked files
   hexload: 60,
-  // 5.3 Mbit/s
+  // 5.3-6.6 Mbit/s
   vidguard: 55,
-  zures: 45,
-  // vimeos 3.9 Mbit/s
-  vidara: 40,
-  // 2.6 Mbit/s
-  uqload: 35,
-  // 1.4-2.7 Mbit/s
-  mp4upload: 30,
-  // 2.8 Mbit/s, 11 s to start
-  fastream: 25
-  // 1.2 Mbit/s
+  nupload: 45,
+  // HLS 2.2-4.1 Mbit/s, ~3 s to start (11-24)
+  zures: 38,
+  // vimeos 2.9-3.9 Mbit/s, 5-9 s to start
+  uqload: 32,
+  // 0.8-2.7 Mbit/s
+  vidara: 30,
+  // 1.8-2.6 Mbit/s, 10 s to start
+  mp4upload: 28,
+  // 2.3-2.8 Mbit/s, 11-14 s to start
+  fastream: 26
+  // 1.2-2.3 Mbit/s, 10 s to start
 };
 var UNMEASURED = 50;
 var UNKNOWN = 10;
