@@ -2111,11 +2111,13 @@ var init_registry = __esm({
 
 // src/rank.js
 init_registry();
+var NEVER = -1;
 var BY_HOST = [
   [/streamplay|straemplay|powvideo|powwideo/i, 0],
   // a Google reCAPTCHA v2 before the video
-  [/waaw|hqq\.|netu/i, 2],
-  // a click-on-image human check
+  // Waaw/netu: a click-on-image check that not even Kino's visible window got past (owner, 2026-11-23: "quitemos siempre netu
+  // de todo lado"). The same regex catches a bare name ("netu").
+  [/waaw|hqq\.|netu/i, NEVER],
   [/mega\.nz/i, 3],
   // no extractor (client-side decryption)
   [/hglink\.to/i, 55],
