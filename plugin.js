@@ -2127,6 +2127,66 @@ var init_vidara = __esm({
   }
 });
 
+// src/extractors/yandex.js
+function unjson(s) {
+  try {
+    return JSON.parse('"' + s + '"');
+  } catch {
+    return String(s).replace(/\\\//g, "/");
+  }
+}
+function hlsOf(html) {
+  const i2 = html.indexOf('"videoStreams"');
+  if (i2 < 0) return "";
+  const seg = html.slice(i2, i2 + 12e3);
+  const urls = (seg.match(/https:\\?\/\\?\/streaming\.disk\.yandex\.net\/[^"]+?\.m3u8/gi) || []).map(unjson);
+  if (!urls.length) return "";
+  const master = urls.find((u) => /master-playlist\.m3u8/i.test(u));
+  if (master) return master;
+  const h = (u) => {
+    const m = /\/(\d{3,4})p\//.exec(u);
+    return m ? Number(m[1]) : 0;
+  };
+  return urls.slice().sort((a, b) => h(b) - h(a))[0];
+}
+var RE18, DEAD3, TRIES, yandex_default;
+var init_yandex = __esm({
+  "src/extractors/yandex.js"() {
+    init_lib();
+    RE18 = /(?:disk\.yandex\.[a-z]{2,}|yadi\.sk)\//i;
+    DEAD3 = /File not found|не найден|удал[её]н|Nothing found|Страница не найдена/i;
+    TRIES = 3;
+    yandex_default = {
+      id: "yandex",
+      match: (url) => RE18.test(url),
+      async resolve(url) {
+        let dead = false;
+        for (let i2 = 0; i2 < TRIES; i2++) {
+          let html = "";
+          try {
+            html = await getTextCF(url, { referer: "https://disk.yandex.com/", headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9" } });
+          } catch {
+            continue;
+          }
+          const hls = hlsOf(html);
+          if (hls) return { streams: [{ url: hls, kind: "hls", server: "yandex", referer: "https://disk.yandex.com/" }] };
+          if (DEAD3.test(html)) {
+            dead = true;
+            break;
+          }
+          if (kino && typeof kino.sleep === "function" && i2 < TRIES - 1) {
+            try {
+              await kino.sleep(500);
+            } catch {
+            }
+          }
+        }
+        return { streams: [], error: dead ? "dead" : "needs_browser" };
+      }
+    };
+  }
+});
+
 // src/registry.js
 var registry_exports = {};
 __export(registry_exports, {
@@ -2173,7 +2233,8 @@ var init_registry = __esm({
     init_turboembed();
     init_vidguard();
     init_vidara();
-    EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default, savefiles_default, rpmvid_default, sendvid_default, turboembed_default, vidguard_default, vidara_default];
+    init_yandex();
+    EXTRACTORS = [voe_default, streamwish_default, streamtape_default, mp4upload_default, vidoza_default, uqload_default, vidmoly_default, streamvid_default, fastream_default, streamhide_default, supervideo_default, okru_default, zures_default, goodstream_default, nupload_default, mixdrop_default, wolfstream_default, lulustream_default, gamovideo_default, doodstream_default, filemoon_default, hexload_default, savefiles_default, rpmvid_default, sendvid_default, turboembed_default, vidguard_default, vidara_default, yandex_default];
   }
 });
 
@@ -2288,7 +2349,7 @@ init_registry();
 // src/extractors/generic.js
 init_lib();
 init_streamwish();
-var DEAD3 = /File is no longer available|File was deleted|has been deleted|File Not Found|The file expired|video (?:was|has been) (?:deleted|removed)/i;
+var DEAD4 = /File is no longer available|File was deleted|has been deleted|File Not Found|The file expired|video (?:was|has been) (?:deleted|removed)/i;
 var PAGE_MS3 = 4e3;
 var SKIP = /mega\.nz|streamplay|straemplay|powvideo|powwideo|waaw|hqq\.|netu|vgembed|videoapp\.zip|strp2p/i;
 var label = (url) => {
@@ -2309,7 +2370,7 @@ var generic_default = {
       return { streams: [], error: "needs_browser" };
     }
     const packed = /p,a,c,k,e,d/.test(data);
-    if (DEAD3.test(data) && !packed) return { streams: [], error: "dead" };
+    if (DEAD4.test(data) && !packed) return { streams: [], error: "dead" };
     if (!packed) return { streams: [], error: "needs_browser" };
     let unpacked = "";
     try {
